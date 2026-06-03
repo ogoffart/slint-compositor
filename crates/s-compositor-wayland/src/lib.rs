@@ -46,6 +46,11 @@ pub enum Event {
     WindowAdded(WindowId),
     WindowRemoved(WindowId),
     WindowTitleChanged(WindowId, String),
+    /// The client asked to (un)maximize itself; the shell decides the geometry.
+    WindowMaximizeRequested {
+        id: WindowId,
+        maximized: bool,
+    },
     /// The window's decoration mode changed (false = client draws its own).
     WindowDecorated {
         id: WindowId,
@@ -147,6 +152,11 @@ impl std::fmt::Debug for Event {
                 .finish(),
             Event::WindowAdded(id) => f.debug_tuple("WindowAdded").field(id).finish(),
             Event::WindowRemoved(id) => f.debug_tuple("WindowRemoved").field(id).finish(),
+            Event::WindowMaximizeRequested { id, maximized } => f
+                .debug_struct("WindowMaximizeRequested")
+                .field("id", id)
+                .field("maximized", maximized)
+                .finish(),
             Event::WindowTitleChanged(id, t) => f
                 .debug_tuple("WindowTitleChanged")
                 .field(id)

@@ -284,39 +284,15 @@ fn main() -> anyhow::Result<()> {
             let Some(d) = weak.upgrade() else {
                 return;
             };
-            let mut windows = windows.borrow_mut();
-            let Some(&row) = windows.rows.get(&(id as u64)) else {
-                return;
-            };
-            let Some(mut tile) = model.row_data(row) else {
-                return;
-            };
-            if tile.maximized {
-                if let Some((x, y, w, h)) = windows.restore.remove(&(id as u64)) {
-                    tile.x = x;
-                    tile.y = y;
-                    tile.width = w;
-                    tile.height = h;
-                }
-                tile.maximized = false;
-            } else {
-                windows
-                    .restore
-                    .insert(id as u64, (tile.x, tile.y, tile.width, tile.height));
-                let (x, y, w, h) = work_area(&d);
-                let titlebar = if tile.decorated { 28.0 } else { 0.0 };
-                tile.x = x;
-                tile.y = y;
-                tile.width = w;
-                tile.height = (h - titlebar).max(1.0);
-                tile.maximized = true;
+            let currently = windows
+                .borrow()
+                .rows
+                .get(&(id as u64))
+                .and_then(|&row| model.row_data(row))
+                .map(|t| t.maximized);
+            if let Some(maxd) = currently {
+                set_maximized(&d, &model, &windows, &cmd_tx, id as u64, !maxd);
             }
-            let _ = cmd_tx.send(s_compositor_wayland::Command::ResizeWindow {
-                id: s_compositor_wayland::WindowId(id as u64),
-                width: tile.width as i32,
-                height: tile.height as i32,
-            });
-            model.set_row_data(row, tile);
         }
     });
 
@@ -510,6 +486,7 @@ fn main() -> anyhow::Result<()> {
         let layers_model = layers_model.clone();
         let wayland_env = wayland_env.clone();
         let file_dialog = file_dialog.clone();
+        let cmd_tx = cmd_tx.clone();
         move || {
             let mut dirty = false;
             let active_ws = weak
@@ -517,6 +494,17 @@ fn main() -> anyhow::Result<()> {
                 .map(|d| d.get_active_workspace())
                 .unwrap_or(0);
             while let Ok(event) = rx.try_recv() {
+                // Client-initiated (un)maximize reuses the work-area logic so it
+                // never covers the panel.
+                if let s_compositor_wayland::Event::WindowMaximizeRequested { id, maximized } =
+                    &event
+                {
+                    if let Some(d) = weak.upgrade() {
+                        set_maximized(&d, &model, &windows, &cmd_tx, id.0, *maximized);
+                        dirty = true;
+                    }
+                    continue;
+                }
                 dirty |= handle_event(
                     event,
                     &model,
@@ -890,6 +878,55 @@ fn u32_to_color(n: u32) -> slint::Color {
         ((n >> 8) & 0xff) as u8,
         (n & 0xff) as u8,
     )
+}
+
+/// Maximize or restore a window, clamping a maximized window to the work area so
+/// it never extends under the panel. Used by both the title-bar button and
+/// client-initiated `xdg_toplevel.set_maximized` requests.
+fn set_maximized(
+    d: &Desktop,
+    model: &Rc<VecModel<WindowTile>>,
+    windows: &Rc<RefCell<Windows>>,
+    cmd_tx: &s_compositor_wayland::CommandSender<s_compositor_wayland::Command>,
+    id: u64,
+    maximized: bool,
+) {
+    let mut windows = windows.borrow_mut();
+    let Some(&row) = windows.rows.get(&id) else {
+        return;
+    };
+    let Some(mut tile) = model.row_data(row) else {
+        return;
+    };
+    if tile.maximized == maximized {
+        return;
+    }
+    if maximized {
+        windows
+            .restore
+            .insert(id, (tile.x, tile.y, tile.width, tile.height));
+        let (x, y, w, h) = work_area(d);
+        let titlebar = if tile.decorated { 28.0 } else { 0.0 };
+        tile.x = x;
+        tile.y = y;
+        tile.width = w;
+        tile.height = (h - titlebar).max(1.0);
+        tile.maximized = true;
+    } else {
+        if let Some((x, y, w, h)) = windows.restore.remove(&id) {
+            tile.x = x;
+            tile.y = y;
+            tile.width = w;
+            tile.height = h;
+        }
+        tile.maximized = false;
+    }
+    let _ = cmd_tx.send(s_compositor_wayland::Command::ResizeWindow {
+        id: s_compositor_wayland::WindowId(id),
+        width: tile.width as i32,
+        height: tile.height as i32,
+    });
+    model.set_row_data(row, tile);
 }
 
 /// The desktop work area `(x, y, w, h)` in logical pixels: the screen minus the

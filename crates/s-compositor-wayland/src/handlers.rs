@@ -38,6 +38,7 @@ use smithay::wayland::shell::xdg::{
     XdgToplevelSurfaceData,
 };
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::{
     delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
@@ -402,6 +403,34 @@ impl XdgShellHandler for SlickState {
         _positioner: PositionerState,
         _token: u32,
     ) {
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        // The shell (UI thread) owns geometry, so it picks the work area that
+        // excludes the panel; just flag the state and let it drive the resize.
+        surface.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Maximized);
+        });
+        surface.send_configure();
+        if let Some(entry) = self.windows.get(surface.wl_surface()) {
+            let _ = self.events.send(Event::WindowMaximizeRequested {
+                id: entry.id,
+                maximized: true,
+            });
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        surface.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Maximized);
+        });
+        surface.send_configure();
+        if let Some(entry) = self.windows.get(surface.wl_surface()) {
+            let _ = self.events.send(Event::WindowMaximizeRequested {
+                id: entry.id,
+                maximized: false,
+            });
+        }
     }
 }
 
