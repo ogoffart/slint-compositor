@@ -12,7 +12,7 @@
 mod shm;
 mod texture_cache;
 
-pub use shm::{convert_to_rgba, ShmFormat};
+pub use shm::{blit_over, convert_to_rgba, ShmFormat};
 pub use texture_cache::{ImportedTexture, TextureCache};
 
 /// Pixel dimensions of an imported buffer.

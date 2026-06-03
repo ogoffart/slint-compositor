@@ -54,6 +54,12 @@ pub struct SlickState {
     /// Mapped layer-shell surfaces (bars, wallpapers), keyed by `wl_surface`.
     pub layer_surfaces: HashMap<WlSurface, LayerEntry>,
 
+    /// Last-known RGBA8 contents of every live surface (window roots and their
+    /// subsurfaces), keyed by `wl_surface`. Used to flatten a surface tree into
+    /// a single buffer on commit, so a subsurface that doesn't re-attach a buffer
+    /// every frame (common in GTK/Firefox content areas) stays visible.
+    pub surface_pixels: HashMap<WlSurface, (u32, u32, Vec<u8>)>,
+
     /// Start of the compositor, used to timestamp `wl_callback.done`.
     pub start_time: Instant,
 

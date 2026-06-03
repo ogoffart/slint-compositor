@@ -47,6 +47,55 @@ pub fn convert_to_rgba(
     out
 }
 
+/// Alpha-blend a tightly-packed `src` RGBA8 image of `sw`x`sh` onto a
+/// tightly-packed `dst` RGBA8 canvas of `dw`x`dh`, with its top-left corner at
+/// `(x, y)` (which may be negative or place the source partly off-canvas — those
+/// pixels are clipped). Straight-alpha "source over destination" compositing,
+/// used to flatten a `wl_surface` tree (a window plus its subsurfaces) into one
+/// buffer.
+#[allow(clippy::too_many_arguments)]
+pub fn blit_over(
+    dst: &mut [u8],
+    dw: usize,
+    dh: usize,
+    x: i32,
+    y: i32,
+    src: &[u8],
+    sw: usize,
+    sh: usize,
+) {
+    for row in 0..sh {
+        let dy = y + row as i32;
+        if dy < 0 || dy as usize >= dh {
+            continue;
+        }
+        let dy = dy as usize;
+        for col in 0..sw {
+            let dx = x + col as i32;
+            if dx < 0 || dx as usize >= dw {
+                continue;
+            }
+            let dx = dx as usize;
+            let s = (row * sw + col) * 4;
+            let Some(sp) = src.get(s..s + 4) else { continue };
+            let a = sp[3] as u32;
+            if a == 0 {
+                continue;
+            }
+            let d = (dy * dw + dx) * 4;
+            if a == 255 {
+                dst[d..d + 4].copy_from_slice(sp);
+                continue;
+            }
+            let inv = 255 - a;
+            for c in 0..3 {
+                dst[d + c] = ((sp[c] as u32 * a + dst[d + c] as u32 * inv) / 255) as u8;
+            }
+            dst[d + 3] = (a + dst[d + 3] as u32 * inv / 255) as u8;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +144,52 @@ mod more_tests {
         assert_eq!(out.len(), 1 * 2 * 4);
         assert_eq!(&out[0..4], &[30, 20, 10, 40]); // row 0 converted
         assert_eq!(&out[4..8], &[0, 0, 0, 0]); // row 1 left zeroed
+    }
+}
+
+#[cfg(test)]
+mod blit_tests {
+    use super::*;
+
+    #[test]
+    fn opaque_pixel_overwrites() {
+        let mut dst = vec![0u8; 2 * 2 * 4];
+        let src = [10u8, 20, 30, 255];
+        blit_over(&mut dst, 2, 2, 1, 1, &src, 1, 1);
+        // Only the bottom-right pixel is touched.
+        assert_eq!(&dst[0..4], &[0, 0, 0, 0]);
+        assert_eq!(&dst[12..16], &[10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn half_alpha_blends() {
+        // Red over blue at ~50% alpha.
+        let mut dst = vec![0, 0, 255, 255];
+        let src = [255u8, 0, 0, 128];
+        blit_over(&mut dst, 1, 1, 0, 0, &src, 1, 1);
+        assert_eq!(dst[0], 128); // R = 255*128/255
+        assert_eq!(dst[1], 0);
+        assert_eq!(dst[2], 127); // B = 255*127/255
+        assert_eq!(dst[3], 255);
+    }
+
+    #[test]
+    fn negative_offset_clips() {
+        // 2x2 source placed at (-1,-1): only its bottom-right pixel lands at (0,0).
+        let mut dst = vec![0u8; 1 * 1 * 4];
+        let src = [
+            1, 1, 1, 255, 2, 2, 2, 255, // row 0
+            3, 3, 3, 255, 4, 4, 4, 255, // row 1
+        ];
+        blit_over(&mut dst, 1, 1, -1, -1, &src, 2, 2);
+        assert_eq!(&dst[0..4], &[4, 4, 4, 255]);
+    }
+
+    #[test]
+    fn fully_offscreen_is_noop() {
+        let mut dst = vec![9u8; 4];
+        let src = [1u8, 2, 3, 255];
+        blit_over(&mut dst, 1, 1, 5, 5, &src, 1, 1);
+        assert_eq!(dst, vec![9, 9, 9, 9]);
     }
 }
