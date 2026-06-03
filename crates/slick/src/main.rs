@@ -172,11 +172,13 @@ fn handle_event(
             height,
             pixels,
             title,
+            decorated,
         } => {
             let mut windows = windows.borrow_mut();
             if let Some(&row) = windows.rows.get(&id.0) {
                 if let Some(mut tile) = model.row_data(row) {
                     tile.title = title.into();
+                    tile.decorated = decorated;
                     model.set_row_data(row, tile);
                 }
             } else {
@@ -186,6 +188,7 @@ fn handle_event(
                     id: id.0 as i32,
                     texture: slint::Image::default(),
                     title: title.into(),
+                    decorated,
                     x: offset,
                     y: offset,
                     width: width as f32,
@@ -201,6 +204,16 @@ fn handle_event(
                     pixels,
                 },
             );
+            true
+        }
+        Event::WindowDecorated { id, decorated } => {
+            let windows = windows.borrow();
+            if let Some(&row) = windows.rows.get(&id.0) {
+                if let Some(mut tile) = model.row_data(row) {
+                    tile.decorated = decorated;
+                    model.set_row_data(row, tile);
+                }
+            }
             true
         }
         Event::WindowRemoved(id) => {
@@ -234,6 +247,11 @@ fn spawn_command(cmd: &str, wayland_display: Option<&str>) {
 
     let mut command = std::process::Command::new("/bin/sh");
     command.arg("-c").arg(cmd);
+    // Children must connect to slick via WAYLAND_DISPLAY. Remove any inherited
+    // WAYLAND_SOCKET (an fd slick received from its own host): libwayland prefers
+    // it over WAYLAND_DISPLAY, which would make the child target the wrong
+    // compositor and fail with "permission denied".
+    command.env_remove("WAYLAND_SOCKET");
     if let Some(display) = wayland_display {
         command.env("WAYLAND_DISPLAY", display);
     }

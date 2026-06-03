@@ -60,10 +60,11 @@ impl CompositorHandler for SlickState {
             return;
         };
         let id = entry.id;
+        let decorated = entry.decorated;
 
         // Collect frame callbacks (fired later, throttled) and the new buffer.
         let mut callbacks = Vec::new();
-        let buffer_event = extract_commit(surface, id, &mut callbacks);
+        let buffer_event = extract_commit(surface, id, decorated, &mut callbacks);
         self.pending_callbacks.append(&mut callbacks);
         if let Some(event) = buffer_event {
             let _ = self.events.send(event);
@@ -76,6 +77,7 @@ impl CompositorHandler for SlickState {
 fn extract_commit(
     surface: &WlSurface,
     id: WindowId,
+    decorated: bool,
     callbacks: &mut Vec<WlCallback>,
 ) -> Option<Event> {
     with_states(surface, |states| {
@@ -108,6 +110,7 @@ fn extract_commit(
                 height,
                 pixels,
                 title,
+                decorated,
             }),
             Ok(None) => {
                 log::debug!("window {id:?}: unsupported shm format");
@@ -175,6 +178,7 @@ impl XdgShellHandler for SlickState {
             WindowEntry {
                 id,
                 toplevel: surface,
+                decorated: true,
             },
         );
         let _ = self.events.send(Event::WindowAdded(id));
@@ -210,26 +214,40 @@ impl XdgShellHandler for SlickState {
 
 impl XdgDecorationHandler for SlickState {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
-        // slick draws decorations itself, so always advertise server-side.
-        toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(DecorationMode::ServerSide);
-        });
-        toplevel.send_configure();
+        // Default to server-side; clients that prefer their own decorations will
+        // follow up with a request for ClientSide.
+        self.set_decoration_mode(&toplevel, DecorationMode::ServerSide);
     }
 
-    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
-        // We only ever do server-side decorations, regardless of the request.
-        toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(DecorationMode::ServerSide);
-        });
-        toplevel.send_configure();
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        // Honor the client's preference: if it wants client-side decorations,
+        // slick won't draw any.
+        self.set_decoration_mode(&toplevel, mode);
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        // No preference -> fall back to server-side.
+        self.set_decoration_mode(&toplevel, DecorationMode::ServerSide);
+    }
+}
+
+impl SlickState {
+    /// Apply a decoration mode to a toplevel and record whether slick should
+    /// draw decorations for it.
+    fn set_decoration_mode(&mut self, toplevel: &ToplevelSurface, mode: DecorationMode) {
         toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(DecorationMode::ServerSide);
+            state.decoration_mode = Some(mode);
         });
         toplevel.send_configure();
+        let decorated = mode == DecorationMode::ServerSide;
+        let id = self.windows.get_mut(toplevel.wl_surface()).map(|entry| {
+            entry.decorated = decorated;
+            entry.id
+        });
+        if let Some(id) = id {
+            log::info!("window {id:?}: decoration mode {mode:?} (decorated={decorated})");
+            let _ = self.events.send(Event::WindowDecorated { id, decorated });
+        }
     }
 }
 

@@ -59,6 +59,9 @@ pub struct SlickState {
 pub struct WindowEntry {
     pub id: WindowId,
     pub toplevel: ToplevelSurface,
+    /// Whether slick draws server-side decorations for this window. False when
+    /// the client requested client-side decorations via xdg-decoration.
+    pub decorated: bool,
 }
 
 impl SlickState {

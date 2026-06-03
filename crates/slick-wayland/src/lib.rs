@@ -42,6 +42,11 @@ pub enum Event {
     WindowAdded(WindowId),
     WindowRemoved(WindowId),
     WindowTitleChanged(WindowId, String),
+    /// The window's decoration mode changed (false = client draws its own).
+    WindowDecorated {
+        id: WindowId,
+        decorated: bool,
+    },
     /// A window committed a new frame: tightly-packed RGBA8 of `width`x`height`.
     WindowBuffer {
         id: WindowId,
@@ -49,6 +54,8 @@ pub enum Event {
         height: u32,
         pixels: Vec<u8>,
         title: String,
+        /// Whether slick should draw server-side decorations for this window.
+        decorated: bool,
     },
 }
 
@@ -86,12 +93,18 @@ impl std::fmt::Debug for Event {
                 .field(id)
                 .field(t)
                 .finish(),
+            Event::WindowDecorated { id, decorated } => f
+                .debug_struct("WindowDecorated")
+                .field("id", id)
+                .field("decorated", decorated)
+                .finish(),
             // Don't dump the pixel buffer.
             Event::WindowBuffer {
                 id,
                 width,
                 height,
                 title,
+                decorated,
                 ..
             } => f
                 .debug_struct("WindowBuffer")
@@ -99,6 +112,7 @@ impl std::fmt::Debug for Event {
                 .field("width", width)
                 .field("height", height)
                 .field("title", title)
+                .field("decorated", decorated)
                 .finish(),
         }
     }

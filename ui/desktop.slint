@@ -6,6 +6,7 @@ export struct WindowTile {
     id: int,
     texture: image,
     title: string,
+    decorated: bool,
     x: length,
     y: length,
     width: length,
@@ -21,14 +22,14 @@ component WindowFrame inherits Rectangle {
     x: tile.x;
     y: tile.y;
     width: tile.width;
-    height: tile.height + 28px;
-    border-width: 1px;
+    height: tile.decorated ? tile.height + 28px : tile.height;
+    border-width: tile.decorated ? 1px : 0px;
     border-color: #45475a;
-    background: #313244;
+    background: transparent;
 
     VerticalLayout {
-        // Title bar.
-        Rectangle {
+        // Title bar (only for server-side-decorated windows).
+        if tile.decorated: Rectangle {
             height: 28px;
             background: #313244;
 
