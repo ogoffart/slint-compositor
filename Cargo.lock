@@ -3957,6 +3957,7 @@ name = "s-compositor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "chrono",
  "env_logger",
  "glow",
@@ -3967,6 +3968,7 @@ dependencies = [
  "s-compositor-wayland",
  "slint",
  "slint-build",
+ "zbus",
 ]
 
 [[package]]

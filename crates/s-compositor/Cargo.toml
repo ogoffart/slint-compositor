@@ -21,6 +21,8 @@ chrono.workspace = true
 log.workspace = true
 env_logger.workspace = true
 anyhow.workspace = true
+zbus = "5"
+async-channel = "2"
 
 [build-dependencies]
 slint-build.workspace = true
