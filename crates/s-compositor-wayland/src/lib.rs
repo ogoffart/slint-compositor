@@ -278,6 +278,7 @@ pub fn run(
         windows: std::collections::HashMap::new(),
         popups: std::collections::HashMap::new(),
         layer_surfaces: std::collections::HashMap::new(),
+        surface_pixels: std::collections::HashMap::new(),
         start_time: std::time::Instant::now(),
         pending_callbacks: Vec::new(),
         events: events.clone(),

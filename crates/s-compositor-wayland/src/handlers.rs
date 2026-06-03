@@ -60,13 +60,21 @@ impl CompositorHandler for SlickState {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        // A commit may arrive on a subsurface (desync mode) rather than the
+        // window's root surface. Normalize to the root so we always re-flatten
+        // the whole tree and answer every surface's frame callbacks — otherwise
+        // multi-surface clients (GTK, Firefox) stall waiting on callbacks we'd
+        // never fire.
+        let root = root_surface(surface);
         let mut callbacks = Vec::new();
 
         // Toplevel window?
-        if let Some(entry) = self.windows.get(surface) {
+        if let Some(entry) = self.windows.get(&root) {
             let (id, decorated) = (entry.id, entry.decorated);
-            let buffer = extract_buffer(surface, &mut callbacks);
-            let title = read_title(surface);
+            let title = read_title(&root);
+            let mut cache = std::mem::take(&mut self.surface_pixels);
+            let buffer = composite_tree(&root, &mut cache, &mut callbacks);
+            self.surface_pixels = cache;
             self.pending_callbacks.append(&mut callbacks);
             if let Some((width, height, pixels)) = buffer {
                 let _ = self.events.send(Event::WindowBuffer {
@@ -82,9 +90,11 @@ impl CompositorHandler for SlickState {
         }
 
         // Popup (menu, dropdown, tooltip)?
-        if let Some(entry) = self.popups.get(surface) {
+        if let Some(entry) = self.popups.get(&root) {
             let (id, parent, offset) = (entry.id, entry.parent_id, entry.offset);
-            let buffer = extract_buffer(surface, &mut callbacks);
+            let mut cache = std::mem::take(&mut self.surface_pixels);
+            let buffer = composite_tree(&root, &mut cache, &mut callbacks);
+            self.surface_pixels = cache;
             self.pending_callbacks.append(&mut callbacks);
             if let Some((width, height, pixels)) = buffer {
                 let _ = self.events.send(Event::PopupBuffer {
@@ -101,12 +111,14 @@ impl CompositorHandler for SlickState {
         }
 
         // Layer-shell surface (bar, wallpaper, notification)?
-        if let Some(entry) = self.layer_surfaces.get(surface) {
+        if let Some(entry) = self.layer_surfaces.get(&root) {
             let (id, layer) = (entry.id, entry.layer);
-            let buffer = extract_buffer(surface, &mut callbacks);
+            let mut cache = std::mem::take(&mut self.surface_pixels);
+            let buffer = composite_tree(&root, &mut cache, &mut callbacks);
+            self.surface_pixels = cache;
             self.pending_callbacks.append(&mut callbacks);
             if let Some((width, height, pixels)) = buffer {
-                let (anchor, margin) = with_states(surface, |states| {
+                let (anchor, margin) = with_states(&root, |states| {
                     let mut guard = states.cached_state.get::<LayerSurfaceCachedState>();
                     let state = guard.current();
                     (state.anchor, state.margin)
@@ -122,8 +134,122 @@ impl CompositorHandler for SlickState {
                     pixels,
                 });
             }
+            return;
+        }
+
+        // Unknown root (e.g. a surface that hasn't taken an xdg/layer role yet,
+        // or an orphan subsurface). Still drain this surface's frame callbacks so
+        // the client isn't left blocked.
+        with_states(surface, |states| {
+            let mut guard = states.cached_state.get::<SurfaceAttributes>();
+            callbacks.append(&mut guard.current().frame_callbacks);
+        });
+        self.pending_callbacks.append(&mut callbacks);
+    }
+}
+
+/// Walk up the subsurface parent chain to the root `wl_surface` of a tree.
+fn root_surface(surface: &WlSurface) -> WlSurface {
+    use smithay::wayland::compositor::get_parent;
+    let mut current = surface.clone();
+    while let Some(parent) = get_parent(&current) {
+        current = parent;
+    }
+    current
+}
+
+/// Flatten a surface tree (a root plus its subsurfaces) into a single
+/// tightly-packed RGBA8 buffer sized to the root's buffer, while draining every
+/// surface's frame callbacks into `callbacks`.
+///
+/// `cache` holds the last-known pixels of each surface so subsurfaces that don't
+/// re-attach a buffer on every parent commit stay visible. Dead surfaces are
+/// pruned from it.
+fn composite_tree(
+    root: &WlSurface,
+    cache: &mut std::collections::HashMap<WlSurface, (u32, u32, Vec<u8>)>,
+    callbacks: &mut Vec<WlCallback>,
+) -> Option<(u32, u32, Vec<u8>)> {
+    use smithay::reexports::wayland_server::Resource;
+    use smithay::wayland::compositor::{
+        with_surface_tree_downward, SubsurfaceCachedState, TraversalAction,
+    };
+
+    cache.retain(|s, _| s.is_alive());
+
+    // Collect the draw order: (location, surface) for every surface that has
+    // pixels to show, top-of-tree first (render order is parent before child).
+    let mut draw: Vec<((i32, i32), WlSurface)> = Vec::new();
+
+    with_surface_tree_downward(
+        root,
+        (0i32, 0i32),
+        |_surface, states, &location| {
+            // The location passed to children is this surface's location plus its
+            // own subsurface offset (0 for the root toplevel).
+            let off = states
+                .cached_state
+                .get::<SubsurfaceCachedState>()
+                .current()
+                .location;
+            TraversalAction::DoChildren((location.0 + off.x, location.1 + off.y))
+        },
+        |surface, states, &location| {
+            // This surface's own position (parent base + its subsurface offset).
+            let off = states
+                .cached_state
+                .get::<SubsurfaceCachedState>()
+                .current()
+                .location;
+            let pos = (location.0 + off.x, location.1 + off.y);
+
+            // Drain frame callbacks for this surface.
+            let new_buffer = {
+                let mut guard = states.cached_state.get::<SurfaceAttributes>();
+                let attrs = guard.current();
+                callbacks.append(&mut attrs.frame_callbacks);
+                attrs.buffer.take()
+            };
+
+            match new_buffer {
+                Some(BufferAssignment::NewBuffer(buffer)) => {
+                    if let Ok(Some(frame)) = with_buffer_contents(&buffer, read_shm) {
+                        cache.insert(surface.clone(), frame);
+                    }
+                    buffer.release();
+                }
+                Some(BufferAssignment::Removed) => {
+                    cache.remove(surface);
+                }
+                None => {}
+            }
+
+            if cache.contains_key(surface) {
+                draw.push((pos, surface.clone()));
+            }
+        },
+        |_, _, _| true,
+    );
+
+    // Canvas size is the root surface's own buffer size.
+    let (cw, ch, _) = cache.get(root)?;
+    let (cw, ch) = (*cw as usize, *ch as usize);
+    let mut canvas = vec![0u8; cw * ch * 4];
+    for (pos, surface) in &draw {
+        if let Some((w, h, pixels)) = cache.get(surface) {
+            s_compositor_render::blit_over(
+                &mut canvas,
+                cw,
+                ch,
+                pos.0,
+                pos.1,
+                pixels,
+                *w as usize,
+                *h as usize,
+            );
         }
     }
+    Some((cw as u32, ch as u32, canvas))
 }
 
 fn layer_to_u8(layer: Layer) -> u8 {
@@ -148,42 +274,6 @@ fn layer_position(anchor: Anchor, margin: Margins, w: i32, h: i32) -> (i32, i32)
         margin.top
     };
     (x, y)
-}
-
-/// Drain the surface's frame callbacks into `callbacks` and, if a new shm buffer
-/// was attached, copy its pixels out as tightly-packed RGBA8.
-fn extract_buffer(
-    surface: &WlSurface,
-    callbacks: &mut Vec<WlCallback>,
-) -> Option<(u32, u32, Vec<u8>)> {
-    with_states(surface, |states| {
-        let mut guard = states.cached_state.get::<SurfaceAttributes>();
-        let attrs = guard.current();
-
-        callbacks.append(&mut attrs.frame_callbacks);
-
-        // Consume any newly attached buffer (clearing it so we don't reprocess).
-        let buffer = match attrs.buffer.take() {
-            Some(BufferAssignment::NewBuffer(buffer)) => buffer,
-            _ => return None,
-        };
-
-        let result = with_buffer_contents(&buffer, read_shm);
-        // shm contents are copied within the callback; release for reuse.
-        buffer.release();
-
-        match result {
-            Ok(Some(frame)) => Some(frame),
-            Ok(None) => {
-                log::debug!("unsupported shm format");
-                None
-            }
-            Err(err) => {
-                log::debug!("non-shm buffer ({err:?})");
-                None
-            }
-        }
-    })
 }
 
 /// Read the toplevel title from a surface's xdg state.
