@@ -1,0 +1,53 @@
+import { Theme } from "theme.slint";
+
+// A transient on-screen display, shown briefly when volume changes via the
+// keyboard. Centred near the bottom; click-through (no TouchArea).
+export component Osd inherits Rectangle {
+    in property <float> volume;   // 0..100
+    in property <bool> muted;
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 64px;
+        width: 260px;
+        height: 56px;
+        background: Theme.bg;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: Theme.hover;
+
+        HorizontalLayout {
+            padding: 14px;
+            spacing: 12px;
+            Text {
+                text: root.muted || root.volume <= 0 ? "🔇" : (root.volume < 50 ? "🔉" : "🔊");
+                font-size: 20px;
+                vertical-alignment: center;
+            }
+            // Volume bar.
+            Rectangle {
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
+                background: Theme.surface;
+                border-radius: 5px;
+                height: 10px;
+                y: (parent.height - self.height) / 2;
+                Rectangle {
+                    x: 0;
+                    width: parent.width * (root.muted ? 0 : root.volume / 100);
+                    height: parent.height;
+                    border-radius: 5px;
+                    background: Theme.accent;
+                }
+            }
+            Text {
+                text: "\{round(root.volume)}%";
+                color: Theme.fg;
+                font-size: 13px;
+                vertical-alignment: center;
+                width: 38px;
+                horizontal-alignment: right;
+            }
+        }
+    }
+}

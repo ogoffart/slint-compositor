@@ -242,6 +242,12 @@ fn main() {
     save(&ui, &window, PhysicalSize::new(1100, 720), "shot_quick.png");
     ui.set_quick_settings_visible(false);
 
+    // Volume OSD.
+    ui.set_volume(40.0);
+    ui.set_osd_visible(true);
+    save(&ui, &window, PhysicalSize::new(1100, 720), "shot_osd.png");
+    ui.set_osd_visible(false);
+
     // 6. Notification popups.
     ui.set_notifications(
         Rc::new(slint::VecModel::from(vec![

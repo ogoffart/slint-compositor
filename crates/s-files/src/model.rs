@@ -390,7 +390,11 @@ impl Browser {
             }
             match ops::move_into(&src, &dir) {
                 Ok(_) => moved = true,
-                Err(err) => log::warn!("move {} into {} failed: {err}", src.display(), dir.display()),
+                Err(err) => log::warn!(
+                    "move {} into {} failed: {err}",
+                    src.display(),
+                    dir.display()
+                ),
             }
         }
         if moved {
@@ -824,7 +828,12 @@ fn perm_string(meta: &std::fs::Metadata) -> String {
                 if bits & 0o1 != 0 { 'x' } else { '-' },
             )
         };
-        return format!("{}{}{}", rwx((mode >> 6) & 7), rwx((mode >> 3) & 7), rwx(mode & 7));
+        return format!(
+            "{}{}{}",
+            rwx((mode >> 6) & 7),
+            rwx((mode >> 3) & 7),
+            rwx(mode & 7)
+        );
     }
     #[cfg(not(unix))]
     {

@@ -544,6 +544,8 @@ fn main() -> anyhow::Result<()> {
 
     // Keyboard: forward each press as a (modifier-wrapped) key tap.
     // Returns true if the key event matched a shortcut (and was consumed).
+    // When was the volume OSD last shown (drives its auto-hide).
+    let osd_until: Rc<RefCell<Option<std::time::Instant>>> = Rc::new(RefCell::new(None));
     let run_binding: Rc<dyn Fn(&str, bool, bool, bool, bool) -> bool> = {
         let keybinds = keybinds.clone();
         let weak = desktop.as_weak();
@@ -554,6 +556,7 @@ fn main() -> anyhow::Result<()> {
         let vol_tx = vol_cmd_tx.clone();
         let notif_model = notif_model.clone();
         let notif_expiry = notif_expiry.clone();
+        let osd_until = osd_until.clone();
         Rc::new(move |text: &str, ctrl, alt, shift, meta| {
             let key = keybind::normalize_text(text);
             let Some(bind) = keybinds
@@ -574,6 +577,17 @@ fn main() -> anyhow::Result<()> {
                     &notif_model,
                     &notif_expiry,
                 );
+                // Flash the volume OSD on a volume key.
+                if matches!(
+                    bind.action,
+                    keybind::Action::VolumeUp
+                        | keybind::Action::VolumeDown
+                        | keybind::Action::VolumeMute
+                ) {
+                    d.set_osd_visible(true);
+                    *osd_until.borrow_mut() =
+                        Some(std::time::Instant::now() + Duration::from_millis(1200));
+                }
             }
             true
         })
@@ -657,8 +671,21 @@ fn main() -> anyhow::Result<()> {
         let wifi_model = wifi_model.clone();
         let notif_model = notif_model.clone();
         let notif_expiry = notif_expiry.clone();
+        let osd_until = osd_until.clone();
         move || {
             let mut dirty = false;
+
+            // Auto-hide the volume OSD once its window elapses.
+            let osd_expired = osd_until
+                .borrow()
+                .is_some_and(|t| std::time::Instant::now() >= t);
+            if osd_expired {
+                *osd_until.borrow_mut() = None;
+                if let Some(d) = weak.upgrade() {
+                    d.set_osd_visible(false);
+                    dirty = true;
+                }
+            }
 
             // Drain notifications, and expire timed-out ones.
             if let Some(rx) = &notif_rx {

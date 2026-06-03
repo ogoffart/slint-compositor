@@ -6,6 +6,7 @@ import { LockScreen } from "lock_screen.slint";
 import { QuickSettings } from "quick_settings.slint";
 import { Notifications } from "notifications.slint";
 import { CalendarPopover } from "calendar.slint";
+import { Osd } from "osd.slint";
 import { Settings } from "settings.slint";
 import { FileDialog } from "file_dialog.slint";
 import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification, CalendarDay } from "types.slint";
@@ -236,6 +237,8 @@ export component Desktop inherits Window {
     in-out property <bool> settings-visible: false;
     in-out property <bool> start-menu-visible: false;
     in-out property <bool> quick-settings-visible: false;
+    // Transient volume on-screen display (shown when changed via the keyboard).
+    in-out property <bool> osd-visible: false;
 
     // System tray + quick settings (volume / Wi-Fi), driven from Rust.
     in property <[TrayIcon]> tray-icons;
@@ -487,6 +490,15 @@ export component Desktop inherits Window {
         dismiss(id) => {
             root.dismiss-notification(id);
         }
+    }
+
+    if root.osd-visible: Osd {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        volume: root.volume;
+        muted: root.muted;
     }
 
     // Popups (menus, dropdowns) on top of windows and the panel.
