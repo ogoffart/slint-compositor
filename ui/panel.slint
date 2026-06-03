@@ -156,6 +156,7 @@ export component Panel inherits Rectangle {
     callback toggle-settings();
     callback toggle-quick-settings();
     callback toggle-calendar();
+    callback open-files();
     callback activate(int);
     callback switch-workspace(int);
     callback tray-activate(string);
@@ -170,6 +171,12 @@ export component Panel inherits Rectangle {
             icon-color: Theme.accent;
             height: 40px;
             clicked => { root.toggle-start-menu(); }
+        }
+        PanelButton {
+            icon: "🗂";
+            icon-color: #e6b34d;
+            height: 40px;
+            clicked => { root.open-files(); }
         }
         PanelButton {
             icon: "⚙";
@@ -221,6 +228,12 @@ export component Panel inherits Rectangle {
             icon-color: Theme.accent;
             width: 40px;
             clicked => { root.toggle-start-menu(); }
+        }
+        PanelButton {
+            icon: "🗂";
+            icon-color: #e6b34d;
+            width: 40px;
+            clicked => { root.open-files(); }
         }
         PanelButton {
             icon: "⚙";

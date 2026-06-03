@@ -63,6 +63,20 @@ fn bundled(bin: &str) -> Option<String> {
         .then(|| candidate.to_string_lossy().into_owned())
 }
 
+/// The command to launch a file manager: our bundled `s-files` when available,
+/// else a system one. Used by the panel's quick-launch Files button.
+pub fn file_manager_command() -> String {
+    bundled("s-files")
+        .or_else(|| on_path("s-files").then(|| "s-files".to_string()))
+        .or_else(|| {
+            ["nautilus", "thunar", "pcmanfm", "dolphin"]
+                .iter()
+                .find(|bin| on_path(bin))
+                .map(|bin| bin.to_string())
+        })
+        .unwrap_or_else(|| "s-files".to_string())
+}
+
 /// Auto-discover sensible default start-menu apps: a browser, a terminal, a file
 /// manager and a few games, picking whatever is installed.
 pub fn discover_default_apps() -> Vec<AppEntry> {
