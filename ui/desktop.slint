@@ -281,6 +281,8 @@ export component Desktop inherits Window {
     in-out property <int> file-dialog-selected: -1;
     in property <image> file-dialog-preview;
     in property <string> file-dialog-selected-name;
+    // Command for the panel's quick-launch Files button.
+    in property <string> files-command;
 
     callback launch(string);
     callback close-window(int);
@@ -454,6 +456,9 @@ export component Desktop inherits Window {
         }
         toggle-settings => {
             root.settings-visible = !root.settings-visible;
+        }
+        open-files => {
+            root.launch(root.files-command);
         }
         toggle-quick-settings => {
             root.quick-settings-visible = !root.quick-settings-visible;

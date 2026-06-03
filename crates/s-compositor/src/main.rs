@@ -90,6 +90,7 @@ fn main() -> anyhow::Result<()> {
             })
             .collect::<Vec<_>>(),
     ))));
+    desktop.set_files_command(config::file_manager_command().into());
 
     // Lock-screen password (empty = unlock on Enter).
     let lock_password: Rc<RefCell<String>> = Rc::new(RefCell::new(loaded.lock_password.clone()));
