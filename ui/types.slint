@@ -31,6 +31,8 @@ export struct FileItem {
     size: string,
     modified: string,
     thumb: image,
+    // Whether this row is part of the current multi-selection.
+    selected: bool,
 }
 
 // A start-menu application entry. `kind`: "app" launches `command`, "run" opens

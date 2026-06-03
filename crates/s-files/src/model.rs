@@ -10,8 +10,9 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use slint::VecModel;
+use slint::{Model, VecModel};
 
+use crate::ops;
 use crate::{FileItem, Files};
 
 pub struct Browser {
@@ -22,6 +23,15 @@ pub struct Browser {
     entries: Vec<PathBuf>,
     /// Directories visited, for the Back button.
     history: Vec<PathBuf>,
+    /// Per-row selection flags (parallel to `entries`).
+    marks: Vec<bool>,
+    /// Active row (drives the preview and keyboard movement); -1 when empty.
+    cursor: i32,
+    /// Anchor row for range (Shift) selection.
+    anchor: i32,
+    /// Pending cut/copy: the paths and whether this is a move.
+    clipboard: Vec<PathBuf>,
+    clip_cut: bool,
 }
 
 /// A shared, reference-counted browser.
@@ -35,15 +45,18 @@ impl Browser {
             cwd: PathBuf::from("/"),
             entries: Vec::new(),
             history: Vec::new(),
+            marks: Vec::new(),
+            cursor: -1,
+            anchor: -1,
+            clipboard: Vec::new(),
+            clip_cut: false,
         }
     }
 
     /// Enter `dir`, pushing the current directory onto the back-history.
     pub fn navigate(&mut self, dir: PathBuf) {
         let prev = self.cwd.clone();
-        if self.list(dir) && !self.entries.is_empty() {
-            // (list() updated self.cwd; only record history on a real move.)
-        }
+        self.list(dir);
         if self.cwd != prev {
             self.history.push(prev);
             self.update_back();
@@ -77,15 +90,94 @@ impl Browser {
             if let Some(parent) = path.parent().map(Path::to_path_buf) {
                 self.navigate(parent);
                 if let Some(idx) = self.entries.iter().position(|p| p == &path) {
-                    self.update_selection(idx as i32);
+                    self.set_single(idx as i32);
                 }
             }
         }
     }
 
-    pub fn entry_clicked(&mut self, idx: i32) {
-        if idx >= 0 && (idx as usize) < self.entries.len() {
-            self.update_selection(idx);
+    // --- Selection ---------------------------------------------------------
+
+    /// Pointer press on row `idx`, honouring Ctrl (toggle) and Shift (range).
+    pub fn row_pressed(&mut self, idx: i32, ctrl: bool, shift: bool) {
+        if idx < 0 || idx as usize >= self.entries.len() {
+            return;
+        }
+        if shift && self.anchor >= 0 {
+            self.range_to(idx);
+        } else if ctrl {
+            self.toggle(idx);
+        } else {
+            self.set_single(idx);
+        }
+    }
+
+    fn set_single(&mut self, idx: i32) {
+        for m in &mut self.marks {
+            *m = false;
+        }
+        if let Some(m) = self.marks.get_mut(idx as usize) {
+            *m = true;
+        }
+        self.cursor = idx;
+        self.anchor = idx;
+        self.sync();
+    }
+
+    fn toggle(&mut self, idx: i32) {
+        if let Some(m) = self.marks.get_mut(idx as usize) {
+            *m = !*m;
+        }
+        self.cursor = idx;
+        self.anchor = idx;
+        self.sync();
+    }
+
+    fn range_to(&mut self, idx: i32) {
+        let (lo, hi) = (self.anchor.min(idx), self.anchor.max(idx));
+        for (i, m) in self.marks.iter_mut().enumerate() {
+            *m = (i as i32) >= lo && (i as i32) <= hi;
+        }
+        self.cursor = idx;
+        self.sync();
+    }
+
+    pub fn select_all(&mut self) {
+        for m in &mut self.marks {
+            *m = true;
+        }
+        if self.cursor < 0 && !self.entries.is_empty() {
+            self.cursor = 0;
+            self.anchor = 0;
+        }
+        self.sync();
+    }
+
+    /// Move the cursor by `delta` rows (clamped). With `shift`, extend the
+    /// selection from the anchor; otherwise select only the new row. Large
+    /// magnitudes act as Home/End.
+    pub fn move_cursor(&mut self, delta: i32, shift: bool) {
+        let count = self.entries.len() as i32;
+        if count == 0 {
+            return;
+        }
+        let base = if self.cursor < 0 {
+            if delta < 0 {
+                count - 1
+            } else {
+                0
+            }
+        } else {
+            self.cursor
+        };
+        let next = (base + delta).clamp(0, count - 1);
+        if shift {
+            if self.anchor < 0 {
+                self.anchor = base;
+            }
+            self.range_to(next);
+        } else {
+            self.set_single(next);
         }
     }
 
@@ -103,40 +195,152 @@ impl Browser {
     }
 
     pub fn activate_selected(&mut self) {
-        let sel = self.weak.upgrade().map(|w| w.get_selected()).unwrap_or(-1);
-        if sel >= 0 {
-            self.activate(sel);
+        if self.cursor >= 0 {
+            self.activate(self.cursor);
         }
     }
 
-    /// Move the keyboard selection by `delta` rows (clamped). Large magnitudes
-    /// act as Home/End.
-    pub fn move_selection(&mut self, delta: i32) {
-        let count = self.entries.len() as i32;
-        if count == 0 {
+    // --- File operations ---------------------------------------------------
+
+    /// The paths the next operation acts on: every marked row, or the cursor
+    /// when nothing is marked.
+    fn targets(&self) -> Vec<PathBuf> {
+        let marked: Vec<PathBuf> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.marks.get(*i).copied().unwrap_or(false))
+            .map(|(_, p)| p.clone())
+            .collect();
+        if !marked.is_empty() {
+            marked
+        } else if self.cursor >= 0 {
+            self.entries
+                .get(self.cursor as usize)
+                .cloned()
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn copy(&mut self) {
+        self.clipboard = self.targets();
+        self.clip_cut = false;
+        self.update_can_paste();
+    }
+
+    pub fn cut(&mut self) {
+        self.clipboard = self.targets();
+        self.clip_cut = true;
+        self.update_can_paste();
+    }
+
+    pub fn paste(&mut self) {
+        if self.clipboard.is_empty() {
             return;
         }
-        let current = self.weak.upgrade().map(|w| w.get_selected()).unwrap_or(-1);
-        let next = if current < 0 {
-            if delta < 0 {
-                count - 1
+        let cwd = self.cwd.clone();
+        let mut last = None;
+        for src in self.clipboard.clone() {
+            let result = if self.clip_cut {
+                ops::move_into(&src, &cwd)
             } else {
-                0
+                ops::copy_into(&src, &cwd)
+            };
+            match result {
+                Ok(path) => last = Some(path),
+                Err(err) => log::warn!("paste {} failed: {err}", src.display()),
             }
-        } else {
-            (current + delta).clamp(0, count - 1)
-        };
-        self.update_selection(next);
+        }
+        if self.clip_cut {
+            self.clipboard.clear();
+            self.clip_cut = false;
+        }
+        self.list(cwd);
+        if let Some(name) = last.as_ref().and_then(|p| p.file_name()) {
+            self.select_by_name(&name.to_string_lossy());
+        }
+        self.update_can_paste();
     }
 
-    /// Set the current selection and refresh the preview pane.
-    fn update_selection(&mut self, idx: i32) {
+    pub fn trash(&mut self) {
+        for path in self.targets() {
+            if let Err(err) = ops::trash(&path) {
+                log::warn!("trash {} failed: {err}", path.display());
+            }
+        }
+        let cwd = self.cwd.clone();
+        self.list(cwd);
+    }
+
+    pub fn rename(&mut self, new_name: &str) {
+        let Some(path) = self.entries.get(self.cursor.max(0) as usize).cloned() else {
+            return;
+        };
+        match ops::rename(&path, new_name) {
+            Ok(dst) => {
+                let cwd = self.cwd.clone();
+                self.list(cwd);
+                if let Some(name) = dst.file_name() {
+                    self.select_by_name(&name.to_string_lossy());
+                }
+            }
+            Err(err) => log::warn!("rename {} failed: {err}", path.display()),
+        }
+    }
+
+    pub fn new_folder(&mut self, name: &str) {
+        match ops::create_folder(&self.cwd.clone(), name) {
+            Ok(dst) => {
+                let cwd = self.cwd.clone();
+                self.list(cwd);
+                if let Some(name) = dst.file_name() {
+                    self.select_by_name(&name.to_string_lossy());
+                }
+            }
+            Err(err) => log::warn!("create folder failed: {err}"),
+        }
+    }
+
+    fn select_by_name(&mut self, name: &str) {
+        if let Some(idx) = self
+            .entries
+            .iter()
+            .position(|p| p.file_name().map_or(false, |n| n == name))
+        {
+            self.set_single(idx as i32);
+        }
+    }
+
+    fn update_can_paste(&self) {
+        if let Some(w) = self.weak.upgrade() {
+            w.set_can_paste(!self.clipboard.is_empty());
+        }
+    }
+
+    /// Push selection state into the model: per-row flags, the cursor, the
+    /// selection count, and the preview pane.
+    fn sync(&self) {
         let Some(w) = self.weak.upgrade() else {
             return;
         };
-        w.set_selected(idx);
-        let path = if idx >= 0 {
-            self.entries.get(idx as usize).cloned()
+        for i in 0..self.entries.len() {
+            if let Some(mut item) = self.items.row_data(i) {
+                let want = self.marks.get(i).copied().unwrap_or(false);
+                if item.selected != want {
+                    item.selected = want;
+                    self.items.set_row_data(i, item);
+                }
+            }
+        }
+        w.set_cursor(self.cursor);
+        w.set_selection_count(self.marks.iter().filter(|m| **m).count() as i32);
+        w.set_can_paste(!self.clipboard.is_empty());
+
+        let path = if self.cursor >= 0 {
+            self.entries.get(self.cursor as usize).cloned()
         } else {
             None
         };
@@ -147,7 +351,6 @@ impl Browser {
             .unwrap_or_default();
         w.set_selected_name(name.into());
         w.set_selected_info(path.as_deref().map(describe).unwrap_or_default().into());
-
         let image = path
             .as_ref()
             .filter(|p| p.is_file() && is_image(p))
@@ -200,9 +403,7 @@ impl Browser {
             let size = if is_dir {
                 "—".to_string()
             } else {
-                meta.as_ref()
-                    .map(|m| human_size(m.len()))
-                    .unwrap_or_default()
+                meta.as_ref().map(|m| human_size(m.len())).unwrap_or_default()
             };
             let modified = meta
                 .as_ref()
@@ -223,16 +424,28 @@ impl Browser {
                 size: size.into(),
                 modified: modified.into(),
                 thumb,
+                selected: false,
             });
         }
-        let has_entries = !rows.is_empty();
         self.items.set_vec(rows);
+
+        // Reset selection: pre-select the first entry so the keyboard and preview
+        // work immediately on entering a directory.
+        self.marks = vec![false; self.entries.len()];
+        if self.entries.is_empty() {
+            self.cursor = -1;
+            self.anchor = -1;
+        } else {
+            self.marks[0] = true;
+            self.cursor = 0;
+            self.anchor = 0;
+        }
 
         if let Some(w) = self.weak.upgrade() {
             w.set_path(self.cwd.to_string_lossy().as_ref().into());
             w.set_window_title(format!("{} — Files", self.title_name()).into());
         }
-        self.update_selection(if has_entries { 0 } else { -1 });
+        self.sync();
         readable
     }
 
@@ -247,7 +460,11 @@ impl Browser {
 /// Launch a file with the system default handler, detached from this process.
 fn launch(path: &Path) {
     use std::process::{Command, Stdio};
-    let opener = if which("xdg-open") { "xdg-open" } else { "gio" };
+    let opener = if which("xdg-open") {
+        "xdg-open"
+    } else {
+        "gio"
+    };
     let mut cmd = Command::new(opener);
     if opener == "gio" {
         cmd.arg("open");
@@ -376,10 +593,7 @@ mod tests {
         assert_eq!(file_kind(Path::new("a.mp3"), false), "audio");
         assert_eq!(file_kind(Path::new("main.rs"), false), "code");
         assert_eq!(file_kind(Path::new("a.pdf"), false), "pdf");
-        assert_eq!(
-            file_kind(Path::new("/nonexistent/unknown.xyz"), false),
-            "file"
-        );
+        assert_eq!(file_kind(Path::new("/nonexistent/unknown.xyz"), false), "file");
     }
 
     #[test]
@@ -402,5 +616,90 @@ mod tests {
         std::env::set_var("HOME", "/home/u");
         assert_eq!(expand_tilde("~/x"), "/home/u/x");
         assert_eq!(expand_tilde("/abs"), "/abs");
+    }
+
+    // --- Model-level operation wiring (headless, no window) -----------------
+
+    fn scratch() -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("sfiles-model-{n}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A browser with no attached window: navigation, selection and operations
+    /// all keep their state in Rust, so the wiring is testable headlessly.
+    fn headless() -> Browser {
+        Browser::new(slint::Weak::default(), Rc::new(VecModel::default()))
+    }
+
+    #[test]
+    fn copy_paste_via_selection() {
+        let dir = scratch();
+        std::fs::write(dir.join("a.txt"), "hello").unwrap();
+        let mut b = headless();
+        b.navigate(dir.clone()); // selects the only entry
+        b.copy();
+        b.paste();
+        assert_eq!(std::fs::read_to_string(dir.join("a (copy).txt")).unwrap(), "hello");
+        assert!(dir.join("a.txt").exists()); // original kept
+    }
+
+    #[test]
+    fn range_selection_copies_all() {
+        let dir = scratch();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.join(n), n).unwrap();
+        }
+        let mut b = headless();
+        b.navigate(dir.clone()); // cursor + anchor at 0 (a.txt)
+        b.row_pressed(2, false, true); // Shift-select through c.txt
+        b.copy();
+        b.paste();
+        for n in ["a (copy).txt", "b (copy).txt", "c (copy).txt"] {
+            assert!(dir.join(n).exists(), "missing {n}");
+        }
+    }
+
+    #[test]
+    fn rename_and_new_folder() {
+        let dir = scratch();
+        std::fs::write(dir.join("old.txt"), "x").unwrap();
+        let mut b = headless();
+        b.navigate(dir.clone());
+        b.rename("new.txt");
+        assert!(dir.join("new.txt").exists() && !dir.join("old.txt").exists());
+        b.new_folder("Project");
+        assert!(dir.join("Project").is_dir());
+    }
+
+    #[test]
+    fn trash_via_selection() {
+        let dir = scratch();
+        std::env::set_var("XDG_DATA_HOME", dir.join("xdgdata"));
+        std::fs::write(dir.join("junk.txt"), "x").unwrap();
+        let mut b = headless();
+        b.navigate(dir.clone());
+        b.trash();
+        assert!(!dir.join("junk.txt").exists());
+        assert!(dir.join("xdgdata/Trash/files/junk.txt").exists());
+    }
+
+    #[test]
+    fn cut_then_paste_moves() {
+        let dir = scratch();
+        let src = dir.join("src");
+        let dst = dir.join("dst");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::create_dir(&dst).unwrap();
+        std::fs::write(src.join("f.txt"), "data").unwrap();
+        let mut b = headless();
+        b.navigate(src.clone()); // selects f.txt
+        b.cut();
+        b.navigate(dst.clone());
+        b.paste();
+        assert!(dst.join("f.txt").exists());
+        assert!(!src.join("f.txt").exists()); // moved, not copied
     }
 }

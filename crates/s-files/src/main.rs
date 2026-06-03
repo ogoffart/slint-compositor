@@ -7,6 +7,7 @@
 //! enters it.
 
 mod model;
+mod ops;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -36,13 +37,15 @@ fn main() -> Result<(), slint::PlatformError> {
     browser.borrow_mut().navigate(start);
 
     macro_rules! on {
+        // Zero-argument callback.
         ($setter:ident, $method:ident) => {{
             let b = browser.clone();
             window.$setter(move || b.borrow_mut().$method());
         }};
-        ($setter:ident, $method:ident, arg) => {{
+        // Callback forwarding its argument(s) verbatim.
+        ($setter:ident, $method:ident, |$($a:ident),+|) => {{
             let b = browser.clone();
-            window.$setter(move |arg| b.borrow_mut().$method(arg));
+            window.$setter(move |$($a),+| b.borrow_mut().$method($($a),+));
         }};
     }
 
@@ -50,12 +53,25 @@ fn main() -> Result<(), slint::PlatformError> {
     on!(on_go_up, go_up);
     on!(on_go_home, go_home);
     on!(on_activate_selected, activate_selected);
-    on!(on_entry_clicked, entry_clicked, arg);
-    on!(on_activate, activate, arg);
-    on!(on_move_selection, move_selection, arg);
+    on!(on_select_all, select_all);
+    on!(on_copy, copy);
+    on!(on_cut, cut);
+    on!(on_paste, paste);
+    on!(on_trash, trash);
+    on!(on_activate, activate, |idx|);
+    on!(on_row_pressed, row_pressed, |idx, ctrl, shift|);
+    on!(on_move_cursor, move_cursor, |delta, shift|);
     {
         let b = browser.clone();
         window.on_navigate_to(move |path| b.borrow_mut().navigate_to(path.as_str()));
+    }
+    {
+        let b = browser.clone();
+        window.on_rename(move |name| b.borrow_mut().rename(name.as_str()));
+    }
+    {
+        let b = browser.clone();
+        window.on_new_folder(move |name| b.borrow_mut().new_folder(name.as_str()));
     }
 
     window.run()
@@ -112,6 +128,11 @@ mod screenshot {
         files.set_items(items.clone().into());
         let browser = Rc::new(RefCell::new(Browser::new(files.as_weak(), items)));
         browser.borrow_mut().navigate(PathBuf::from(&dir));
+        // Optionally Shift-select rows 0..=N to show multi-selection.
+        if let Some(n) = std::env::var("SFILES_SHOT_RANGE").ok().and_then(|v| v.parse::<i32>().ok()) {
+            browser.borrow_mut().row_pressed(0, false, false);
+            browser.borrow_mut().row_pressed(n, false, true);
+        }
         files.set_view(view);
         files.show().unwrap();
         files.window().request_redraw();

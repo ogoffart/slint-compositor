@@ -25,11 +25,55 @@ component SegBtn inherits Rectangle {
     }
 }
 
-// Standalone file-browser window. Runs as its own Wayland client (its own
-// binary), but shares the look of the in-shell file dialog: the same type
-// icons, image previews and keyboard model. Three view modes: large icons, a
-// list with a preview pane, and a details table. All logic — listing,
-// navigation, launching — lives in Rust; this is purely the view.
+// A single context-menu entry.
+component MenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback chosen;
+    height: 30px;
+    background: ta.has-hover && root.enabled ? Theme.hover : transparent;
+    border-radius: 5px;
+    Text {
+        text: root.label;
+        x: 12px;
+        width: parent.width - 24px;
+        vertical-alignment: center;
+        color: root.enabled ? Theme.fg : Theme.subtext;
+        font-size: 13px;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.chosen(); }
+    }
+}
+
+// Mouse interaction for one row/tile: left press selects (honouring Ctrl/Shift),
+// right press opens the context menu, double-click activates.
+component RowHit inherits TouchArea {
+    in property <int> index;
+    in property <bool> is-selected;
+    callback press(int, bool, bool);
+    callback context(int, length, length, bool);
+    callback open(int);
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.down) {
+            if (e.button == PointerEventButton.left) {
+                root.press(root.index, e.modifiers.control, e.modifiers.shift);
+            } else if (e.button == PointerEventButton.right) {
+                root.context(root.index,
+                    self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y,
+                    root.is-selected);
+            }
+        }
+    }
+    double-clicked => { root.open(root.index); }
+}
+
+// Standalone file-browser window. Runs as its own Wayland client, sharing the
+// look of the in-shell file dialog. Three view modes (icons / list / details),
+// multi-selection, a context menu and file operations (copy/cut/paste, rename,
+// trash, new folder). All filesystem logic lives in Rust; this is the view.
 export component Files inherits Window {
     in property <string> window-title: "Files";
     title: root.window-title;
@@ -41,9 +85,9 @@ export component Files inherits Window {
 
     in property <string> path;
     in property <[FileItem]> items;
-    in-out property <int> selected: -1;
-    // Preview of the selected image (empty for non-images), plus its name and a
-    // short, human-readable description of the selection (size / kind).
+    in-out property <int> cursor: -1;
+    in property <int> selection-count;
+    in property <bool> can-paste;
     in property <image> preview;
     in property <string> selected-name;
     in property <string> selected-info;
@@ -54,38 +98,69 @@ export component Files inherits Window {
     callback go-back();
     callback go-up();
     callback go-home();
-    callback navigate-to(string);     // a path typed into the editable bar
-    callback entry-clicked(int);      // single click: select + preview
-    callback activate(int);           // double-click / Enter: open dir or launch
-    callback move-selection(int);     // keyboard delta (big = home/end)
-    callback activate-selected();     // Enter on the current selection
+    callback navigate-to(string);
+    callback row-pressed(int, bool, bool);  // idx, ctrl, shift
+    callback move-cursor(int, bool);        // delta, shift (extend)
+    callback select-all();
+    callback activate(int);                 // open dir / launch file
+    callback activate-selected();
+    callback copy();
+    callback cut();
+    callback paste();
+    callback trash();
+    callback rename(string);
+    callback new-folder(string);
 
     property <length> row-h: 30px;
     property <length> tile-w: 136px;
     property <length> tile-h: 124px;
-    // Columns and centring offset for the icon grid.
     property <int> columns: max(1, floor(scroll.visible-width / root.tile-w));
     property <length> grid-pad: max(0px, (scroll.visible-width - root.columns * root.tile-w) / 2);
+
+    // Context-menu anchor (window coordinates).
+    property <length> menu-x;
+    property <length> menu-y;
+
+    // Rename / new-folder prompt state.
+    property <bool> prompt-visible;
+    property <string> prompt-title;
+    property <int> prompt-mode;       // 1 = rename, 2 = new folder
+    property <string> prompt-initial;
 
     init => {
         keys.focus();
     }
 
-    // Keep the selected entry scrolled into view (works across all three views).
-    changed selected => {
-        if (root.selected >= 0) {
+    // Open the rename/new-folder prompt.
+    function open-rename() {
+        if (root.selection-count >= 1) {
+            root.prompt-mode = 1;
+            root.prompt-title = "Rename";
+            root.prompt-initial = root.selected-name;
+            root.prompt-visible = true;
+        }
+    }
+    function open-new-folder() {
+        root.prompt-mode = 2;
+        root.prompt-title = "New Folder";
+        root.prompt-initial = "untitled folder";
+        root.prompt-visible = true;
+    }
+
+    // Keep the cursor entry scrolled into view (works across all three views).
+    changed cursor => {
+        if (root.cursor >= 0) {
             if (root.view == 0) {
-                // Icon grid: rows are tile-high, addressed by row index.
-                if (floor(root.selected / root.columns) * root.tile-h < -scroll.viewport-y) {
-                    scroll.viewport-y = -(floor(root.selected / root.columns) * root.tile-h);
-                } else if ((floor(root.selected / root.columns) + 1) * root.tile-h > -scroll.viewport-y + scroll.visible-height) {
-                    scroll.viewport-y = -((floor(root.selected / root.columns) + 1) * root.tile-h - scroll.visible-height);
+                if (floor(root.cursor / root.columns) * root.tile-h < -scroll.viewport-y) {
+                    scroll.viewport-y = -(floor(root.cursor / root.columns) * root.tile-h);
+                } else if ((floor(root.cursor / root.columns) + 1) * root.tile-h > -scroll.viewport-y + scroll.visible-height) {
+                    scroll.viewport-y = -((floor(root.cursor / root.columns) + 1) * root.tile-h - scroll.visible-height);
                 }
             } else {
-                if (root.selected * root.row-h < -scroll.viewport-y) {
-                    scroll.viewport-y = -(root.selected * root.row-h);
-                } else if ((root.selected + 1) * root.row-h > -scroll.viewport-y + scroll.visible-height) {
-                    scroll.viewport-y = -((root.selected + 1) * root.row-h - scroll.visible-height);
+                if (root.cursor * root.row-h < -scroll.viewport-y) {
+                    scroll.viewport-y = -(root.cursor * root.row-h);
+                } else if ((root.cursor + 1) * root.row-h > -scroll.viewport-y + scroll.visible-height) {
+                    scroll.viewport-y = -((root.cursor + 1) * root.row-h - scroll.visible-height);
                 }
             }
         }
@@ -95,7 +170,7 @@ export component Files inherits Window {
         padding: 10px;
         spacing: 10px;
 
-        // Toolbar: navigation, editable path, view switch.
+        // Toolbar: navigation, editable path, new folder, view switch.
         HorizontalLayout {
             spacing: 6px;
             Button {
@@ -129,7 +204,10 @@ export component Files inherits Window {
                     }
                 }
             }
-            // View switch.
+            Button {
+                text: "New Folder";
+                clicked => { root.open-new-folder(); }
+            }
             Rectangle {
                 background: Theme.surface;
                 border-radius: 8px;
@@ -157,18 +235,43 @@ export component Files inherits Window {
 
         keys := FocusScope {
             key-pressed(e) => {
-                // In the icon grid, up/down move by a full row of columns.
+                // Operation shortcuts.
+                if (e.modifiers.control && (e.text == "c" || e.text == "C")) {
+                    root.copy();
+                    return EventResult.accept;
+                }
+                if (e.modifiers.control && (e.text == "x" || e.text == "X")) {
+                    root.cut();
+                    return EventResult.accept;
+                }
+                if (e.modifiers.control && (e.text == "v" || e.text == "V")) {
+                    root.paste();
+                    return EventResult.accept;
+                }
+                if (e.modifiers.control && (e.text == "a" || e.text == "A")) {
+                    root.select-all();
+                    return EventResult.accept;
+                }
+                if (e.text == Key.Delete) {
+                    root.trash();
+                    return EventResult.accept;
+                }
+                if (e.text == Key.F2) {
+                    root.open-rename();
+                    return EventResult.accept;
+                }
+                // Movement (Shift extends the selection).
                 if (e.text == Key.UpArrow) {
-                    root.move-selection(root.view == 0 ? -root.columns : -1);
+                    root.move-cursor(root.view == 0 ? -root.columns : -1, e.modifiers.shift);
                     return EventResult.accept;
                 }
                 if (e.text == Key.DownArrow) {
-                    root.move-selection(root.view == 0 ? root.columns : 1);
+                    root.move-cursor(root.view == 0 ? root.columns : 1, e.modifiers.shift);
                     return EventResult.accept;
                 }
                 if (e.text == Key.LeftArrow) {
                     if (root.view == 0) {
-                        root.move-selection(-1);
+                        root.move-cursor(-1, e.modifiers.shift);
                     } else {
                         root.go-up();
                     }
@@ -176,26 +279,26 @@ export component Files inherits Window {
                 }
                 if (e.text == Key.RightArrow) {
                     if (root.view == 0) {
-                        root.move-selection(1);
+                        root.move-cursor(1, e.modifiers.shift);
                     } else {
                         root.activate-selected();
                     }
                     return EventResult.accept;
                 }
                 if (e.text == Key.PageUp) {
-                    root.move-selection(root.view == 0 ? -root.columns * 3 : -12);
+                    root.move-cursor(root.view == 0 ? -root.columns * 3 : -12, e.modifiers.shift);
                     return EventResult.accept;
                 }
                 if (e.text == Key.PageDown) {
-                    root.move-selection(root.view == 0 ? root.columns * 3 : 12);
+                    root.move-cursor(root.view == 0 ? root.columns * 3 : 12, e.modifiers.shift);
                     return EventResult.accept;
                 }
                 if (e.text == Key.Home) {
-                    root.move-selection(-100000);
+                    root.move-cursor(-100000, e.modifiers.shift);
                     return EventResult.accept;
                 }
                 if (e.text == Key.End) {
-                    root.move-selection(100000);
+                    root.move-cursor(100000, e.modifiers.shift);
                     return EventResult.accept;
                 }
                 if (e.text == Key.Return) {
@@ -212,14 +315,12 @@ export component Files inherits Window {
             HorizontalLayout {
                 spacing: 10px;
 
-                // Main area: optional details header + the scrolling view.
                 Rectangle {
                     horizontal-stretch: root.view == 1 ? 3 : 1;
                     background: Theme.surface;
                     border-radius: 8px;
                     clip: true;
                     VerticalLayout {
-                        // Details-view column header.
                         if root.view == 2: Rectangle {
                             height: 28px;
                             background: Theme.bg;
@@ -273,16 +374,17 @@ export component Files inherits Window {
                                     y: floor(idx / root.columns) * root.tile-h;
                                     width: root.tile-w;
                                     height: root.tile-h;
-                                    tile := Rectangle {
+                                    Rectangle {
                                         width: parent.width - 8px;
                                         height: parent.height - 8px;
-                                        background: idx == root.selected ? Theme.accent
-                                            : (tarea.has-hover ? Theme.hover : transparent);
+                                        background: item.selected ? Theme.accent
+                                            : (ihit.has-hover ? Theme.hover : transparent);
                                         border-radius: 10px;
+                                        border-width: idx == root.cursor ? 2px : 0;
+                                        border-color: Theme.accent.brighter(0.4);
                                         VerticalLayout {
                                             padding: 10px;
                                             spacing: 6px;
-                                            // Icon / thumbnail area.
                                             Rectangle {
                                                 height: 72px;
                                                 if item.thumb.width > 0: Image {
@@ -300,7 +402,7 @@ export component Files inherits Window {
                                             }
                                             Text {
                                                 text: item.name;
-                                                color: idx == root.selected ? #ffffff : Theme.fg;
+                                                color: item.selected ? #ffffff : Theme.fg;
                                                 font-size: 12px;
                                                 font-weight: item.is-dir ? 600 : 400;
                                                 horizontal-alignment: center;
@@ -310,11 +412,16 @@ export component Files inherits Window {
                                             }
                                         }
                                     }
-                                    tarea := TouchArea {
-                                        clicked => { root.entry-clicked(idx); }
-                                        double-clicked => {
-                                            root.entry-clicked(idx);
-                                            root.activate(idx);
+                                    ihit := RowHit {
+                                        index: idx;
+                                        is-selected: item.selected;
+                                        press(i, c, s) => { root.row-pressed(i, c, s); }
+                                        open(i) => { root.activate(i); }
+                                        context(i, mx, my, sel) => {
+                                            if (!sel) { root.row-pressed(i, false, false); }
+                                            root.menu-x = mx;
+                                            root.menu-y = my;
+                                            ctx.show();
                                         }
                                     }
                                 }
@@ -325,9 +432,11 @@ export component Files inherits Window {
                                 alignment: start;
                                 for item[idx] in root.items: Rectangle {
                                     height: root.row-h;
-                                    background: idx == root.selected ? Theme.accent
-                                        : (larea.has-hover ? Theme.hover : transparent);
+                                    background: item.selected ? Theme.accent
+                                        : (lhit.has-hover ? Theme.hover : transparent);
                                     border-radius: 6px;
+                                    border-width: idx == root.cursor && !item.selected ? 1px : 0;
+                                    border-color: Theme.accent.brighter(0.4);
                                     HorizontalLayout {
                                         padding-left: 8px;
                                         padding-right: 8px;
@@ -341,7 +450,7 @@ export component Files inherits Window {
                                         }
                                         Text {
                                             text: item.name;
-                                            color: idx == root.selected ? #ffffff
+                                            color: item.selected ? #ffffff
                                                 : (item.is-dir ? Theme.fg : Theme.fg.darker(0.1));
                                             font-size: 13px;
                                             font-weight: item.is-dir ? 600 : 400;
@@ -351,16 +460,21 @@ export component Files inherits Window {
                                         }
                                         if item.is-dir: Text {
                                             text: "›";
-                                            color: idx == root.selected ? #ffffff : Theme.hover;
+                                            color: item.selected ? #ffffff : Theme.hover;
                                             font-size: 16px;
                                             vertical-alignment: center;
                                         }
                                     }
-                                    larea := TouchArea {
-                                        clicked => { root.entry-clicked(idx); }
-                                        double-clicked => {
-                                            root.entry-clicked(idx);
-                                            root.activate(idx);
+                                    lhit := RowHit {
+                                        index: idx;
+                                        is-selected: item.selected;
+                                        press(i, c, s) => { root.row-pressed(i, c, s); }
+                                        open(i) => { root.activate(i); }
+                                        context(i, mx, my, sel) => {
+                                            if (!sel) { root.row-pressed(i, false, false); }
+                                            root.menu-x = mx;
+                                            root.menu-y = my;
+                                            ctx.show();
                                         }
                                     }
                                 }
@@ -371,8 +485,10 @@ export component Files inherits Window {
                                 alignment: start;
                                 for item[idx] in root.items: Rectangle {
                                     height: root.row-h;
-                                    background: idx == root.selected ? Theme.accent
-                                        : (darea.has-hover ? Theme.hover : transparent);
+                                    background: item.selected ? Theme.accent
+                                        : (dhit.has-hover ? Theme.hover : transparent);
+                                    border-width: idx == root.cursor && !item.selected ? 1px : 0;
+                                    border-color: Theme.accent.brighter(0.4);
                                     HorizontalLayout {
                                         padding-left: 12px;
                                         padding-right: 12px;
@@ -391,7 +507,7 @@ export component Files inherits Window {
                                             }
                                             Text {
                                                 text: item.name;
-                                                color: idx == root.selected ? #ffffff
+                                                color: item.selected ? #ffffff
                                                     : (item.is-dir ? Theme.fg : Theme.fg.darker(0.1));
                                                 font-size: 13px;
                                                 font-weight: item.is-dir ? 600 : 400;
@@ -402,7 +518,7 @@ export component Files inherits Window {
                                         }
                                         Text {
                                             text: item.size;
-                                            color: idx == root.selected ? #ffffff : Theme.subtext;
+                                            color: item.selected ? #ffffff : Theme.subtext;
                                             font-size: 12px;
                                             vertical-alignment: center;
                                             horizontal-alignment: right;
@@ -410,24 +526,29 @@ export component Files inherits Window {
                                         }
                                         Text {
                                             text: item.modified;
-                                            color: idx == root.selected ? #ffffff : Theme.subtext;
+                                            color: item.selected ? #ffffff : Theme.subtext;
                                             font-size: 12px;
                                             vertical-alignment: center;
                                             width: 150px;
                                         }
                                         Text {
                                             text: item.kind == "dir" ? "Folder" : item.kind;
-                                            color: idx == root.selected ? #ffffff : Theme.subtext;
+                                            color: item.selected ? #ffffff : Theme.subtext;
                                             font-size: 12px;
                                             vertical-alignment: center;
                                             width: 70px;
                                         }
                                     }
-                                    darea := TouchArea {
-                                        clicked => { root.entry-clicked(idx); }
-                                        double-clicked => {
-                                            root.entry-clicked(idx);
-                                            root.activate(idx);
+                                    dhit := RowHit {
+                                        index: idx;
+                                        is-selected: item.selected;
+                                        press(i, c, s) => { root.row-pressed(i, c, s); }
+                                        open(i) => { root.activate(i); }
+                                        context(i, mx, my, sel) => {
+                                            if (!sel) { root.row-pressed(i, false, false); }
+                                            root.menu-x = mx;
+                                            root.menu-y = my;
+                                            ctx.show();
                                         }
                                     }
                                 }
@@ -485,9 +606,125 @@ export component Files inherits Window {
 
         // Status bar.
         Text {
-            text: root.items.length == 1 ? "1 item" : root.items.length + " items";
+            text: (root.items.length == 1 ? "1 item" : root.items.length + " items")
+                + (root.selection-count > 0 ? " · " + root.selection-count + " selected" : "");
             color: Theme.subtext;
             font-size: 11px;
+        }
+    }
+
+    // Context menu.
+    ctx := PopupWindow {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 200px;
+        Rectangle {
+            background: Theme.panel;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.hover;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000088;
+            VerticalLayout {
+                padding: 6px;
+                spacing: 1px;
+                MenuRow {
+                    label: "Open";
+                    enabled: root.selection-count >= 1;
+                    chosen => { ctx.close(); root.activate-selected(); }
+                }
+                MenuRow {
+                    label: "Rename";
+                    enabled: root.selection-count == 1;
+                    chosen => { ctx.close(); root.open-rename(); }
+                }
+                Rectangle { height: 7px; Rectangle { height: 1px; background: Theme.hover; } }
+                MenuRow {
+                    label: "Cut";
+                    enabled: root.selection-count >= 1;
+                    chosen => { ctx.close(); root.cut(); }
+                }
+                MenuRow {
+                    label: "Copy";
+                    enabled: root.selection-count >= 1;
+                    chosen => { ctx.close(); root.copy(); }
+                }
+                MenuRow {
+                    label: "Paste";
+                    enabled: root.can-paste;
+                    chosen => { ctx.close(); root.paste(); }
+                }
+                Rectangle { height: 7px; Rectangle { height: 1px; background: Theme.hover; } }
+                MenuRow {
+                    label: "New Folder";
+                    chosen => { ctx.close(); root.open-new-folder(); }
+                }
+                MenuRow {
+                    label: "Move to Trash";
+                    enabled: root.selection-count >= 1;
+                    chosen => { ctx.close(); root.trash(); }
+                }
+            }
+        }
+    }
+
+    // Rename / new-folder modal prompt.
+    if root.prompt-visible: Rectangle {
+        background: Theme.overlay;
+        TouchArea {
+            clicked => { root.prompt-visible = false; keys.focus(); }
+        }
+        Rectangle {
+            width: 380px;
+            height: 160px;
+            background: Theme.bg;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.hover;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000099;
+            TouchArea {}  // swallow clicks on the panel
+            VerticalLayout {
+                padding: 18px;
+                spacing: 14px;
+                Text {
+                    text: root.prompt-title;
+                    color: Theme.fg;
+                    font-size: 16px;
+                    font-weight: 600;
+                }
+                pe := LineEdit {
+                    text: root.prompt-initial;
+                    accepted(t) => {
+                        if (root.prompt-mode == 1) { root.rename(t); }
+                        else { root.new-folder(t); }
+                        root.prompt-visible = false;
+                        keys.focus();
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Button {
+                        text: "Cancel";
+                        clicked => { root.prompt-visible = false; keys.focus(); }
+                    }
+                    Button {
+                        text: "OK";
+                        primary: true;
+                        clicked => {
+                            if (root.prompt-mode == 1) { root.rename(pe.text); }
+                            else { root.new-folder(pe.text); }
+                            root.prompt-visible = false;
+                            keys.focus();
+                        }
+                    }
+                }
+            }
+            init => {
+                pe.focus();
+                pe.select-all();
+            }
         }
     }
 }
