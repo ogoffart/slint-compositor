@@ -394,6 +394,14 @@ impl DataDeviceHandler for SlickState {
 impl ClientDndGrabHandler for SlickState {}
 impl ServerDndGrabHandler for SlickState {}
 
+impl smithay::wayland::selection::primary_selection::PrimarySelectionHandler for SlickState {
+    fn primary_selection_state(
+        &self,
+    ) -> &smithay::wayland::selection::primary_selection::PrimarySelectionState {
+        &self.primary_selection_state
+    }
+}
+
 impl OutputHandler for SlickState {}
 
 impl WlrLayerShellHandler for SlickState {
@@ -453,3 +461,4 @@ smithay::delegate_layer_shell!(SlickState);
 delegate_seat!(SlickState);
 delegate_output!(SlickState);
 delegate_data_device!(SlickState);
+smithay::delegate_primary_selection!(SlickState);
