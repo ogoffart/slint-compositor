@@ -1,3 +1,5 @@
 /target
 **/*.rs.bk
 Cargo.lock.orig
+# Screenshots produced by the shell_screenshot example
+/shot_*.png

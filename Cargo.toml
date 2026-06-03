@@ -24,6 +24,7 @@ slint = { version = "1.16", default-features = false, features = [
     "compat-1-2",
     "std",
     "renderer-skia-opengl",
+    "renderer-software",
     "backend-winit",
 ] }
 slint-build = "1.16"
