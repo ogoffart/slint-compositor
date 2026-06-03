@@ -32,6 +32,8 @@ struct Windows {
     closed: Vec<u64>,
     /// The currently focused window.
     focused: Option<u64>,
+    /// Pre-maximize geometry (x, y, w, h) to restore on un-maximize.
+    restore: HashMap<u64, (f32, f32, f32, f32)>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -156,6 +158,71 @@ fn main() -> anyhow::Result<()> {
     desktop.on_fd_cancel({
         let file_dialog = file_dialog.clone();
         move || file_dialog.borrow_mut().cancel()
+    });
+
+    // Minimize: hide the window (it stays in the taskbar).
+    desktop.on_minimize_window({
+        let model = model.clone();
+        let windows = windows.clone();
+        move |id| {
+            let mut windows = windows.borrow_mut();
+            if windows.focused == Some(id as u64) {
+                windows.focused = None;
+            }
+            if let Some(&row) = windows.rows.get(&(id as u64)) {
+                if let Some(mut tile) = model.row_data(row) {
+                    tile.minimized = true;
+                    tile.focused = false;
+                    model.set_row_data(row, tile);
+                }
+            }
+        }
+    });
+
+    // Maximize / restore: fill the work area (screen minus panel) or restore.
+    desktop.on_toggle_maximize_window({
+        let cmd_tx = cmd_tx.clone();
+        let model = model.clone();
+        let windows = windows.clone();
+        let weak = desktop.as_weak();
+        move |id| {
+            let Some(d) = weak.upgrade() else {
+                return;
+            };
+            let mut windows = windows.borrow_mut();
+            let Some(&row) = windows.rows.get(&(id as u64)) else {
+                return;
+            };
+            let Some(mut tile) = model.row_data(row) else {
+                return;
+            };
+            if tile.maximized {
+                if let Some((x, y, w, h)) = windows.restore.remove(&(id as u64)) {
+                    tile.x = x;
+                    tile.y = y;
+                    tile.width = w;
+                    tile.height = h;
+                }
+                tile.maximized = false;
+            } else {
+                windows
+                    .restore
+                    .insert(id as u64, (tile.x, tile.y, tile.width, tile.height));
+                let (x, y, w, h) = work_area(&d);
+                let titlebar = if tile.decorated { 28.0 } else { 0.0 };
+                tile.x = x;
+                tile.y = y;
+                tile.width = w;
+                tile.height = (h - titlebar).max(1.0);
+                tile.maximized = true;
+            }
+            let _ = cmd_tx.send(s_compositor_wayland::Command::ResizeWindow {
+                id: s_compositor_wayland::WindowId(id as u64),
+                width: tile.width as i32,
+                height: tile.height as i32,
+            });
+            model.set_row_data(row, tile);
+        }
     });
 
     // Launcher: run an arbitrary command, pointed at our compositor socket.
@@ -356,6 +423,8 @@ fn handle_event(
                     title: title.into(),
                     decorated,
                     focused: false,
+                    minimized: false,
+                    maximized: false,
                     x: offset,
                     y: offset,
                     width: width as f32,
@@ -421,11 +490,30 @@ fn raise_and_focus(model: &Rc<VecModel<WindowTile>>, windows: &Rc<RefCell<Window
         if let Some(mut tile) = model.row_data(i) {
             w.rows.insert(tile.id as u64, i);
             let want = tile.id as u64 == id;
-            if tile.focused != want {
+            let unminimize = want && tile.minimized;
+            if tile.focused != want || unminimize {
                 tile.focused = want;
+                if unminimize {
+                    tile.minimized = false;
+                }
                 model.set_row_data(i, tile);
             }
         }
+    }
+}
+
+/// The desktop work area `(x, y, w, h)` in logical pixels: the screen minus the
+/// panel on its docked edge.
+fn work_area(d: &Desktop) -> (f32, f32, f32, f32) {
+    let scale = d.window().scale_factor().max(0.01);
+    let size = d.window().size();
+    let (sw, sh) = (size.width as f32 / scale, size.height as f32 / scale);
+    let panel = d.get_panel_size();
+    match d.get_panel_edge() {
+        1 => (panel, 0.0, sw - panel, sh), // Left
+        2 => (0.0, panel, sw, sh - panel), // Top
+        3 => (0.0, 0.0, sw, sh - panel),   // Bottom
+        _ => (0.0, 0.0, sw - panel, sh),   // Right (default)
     }
 }
 

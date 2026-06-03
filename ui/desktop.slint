@@ -9,9 +9,13 @@ export { WindowTile, FileItem }
 component WindowFrame inherits Rectangle {
     in property <WindowTile> tile;
     callback close();
+    callback minimize();
+    callback toggle-maximize();
     callback moved(length, length);              // title-bar drag delta
     callback resized(length, length);            // resize-grip drag delta
     callback focus-requested();                  // raise + focus
+
+    visible: !tile.minimized;
     // pointer: surface-local x, y, kind (0=move,1=down,2=up), button (0..3)
     callback pointer(float, float, int, int);
     callback scroll(float, float);
@@ -46,6 +50,44 @@ component WindowFrame inherits Rectangle {
                     horizontal-stretch: 1;
                 }
 
+                Rectangle {
+                    width: 22px;
+                    y: 3px;
+                    height: 22px;
+                    border-radius: 4px;
+                    background: min-ta.has-hover ? #45475a : transparent;
+                    Text {
+                        text: "—";
+                        color: #cdd6f4;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    min-ta := TouchArea {
+                        clicked => {
+                            root.minimize();
+                        }
+                    }
+                }
+                Rectangle {
+                    width: 22px;
+                    y: 3px;
+                    height: 22px;
+                    border-radius: 4px;
+                    background: max-ta.has-hover ? #45475a : transparent;
+                    Text {
+                        text: tile.maximized ? "▣" : "□";
+                        color: #cdd6f4;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    max-ta := TouchArea {
+                        clicked => {
+                            root.toggle-maximize();
+                        }
+                    }
+                }
                 Rectangle {
                     width: 22px;
                     y: 3px;
@@ -150,6 +192,8 @@ export component Desktop inherits Window {
     in property <string> clock-time;
     in property <[WindowTile]> windows;
     in property <image> background-image;
+    in-out property <int> panel-edge: 0;        // 0=Right 1=Left 2=Top 3=Bottom
+    in-out property <length> panel-size: 72px;
     in-out property <bool> launcher-visible: false;
     in-out property <bool> settings-visible: false;
 
@@ -162,6 +206,8 @@ export component Desktop inherits Window {
 
     callback launch(string);
     callback close-window(int);
+    callback minimize-window(int);
+    callback toggle-maximize-window(int);
     callback activate-window(int);                       // taskbar / raise + focus
     callback move-window(int, length, length);
     callback resize-window(int, length, length);
@@ -194,6 +240,12 @@ export component Desktop inherits Window {
         close => {
             root.close-window(win.id);
         }
+        minimize => {
+            root.minimize-window(win.id);
+        }
+        toggle-maximize => {
+            root.toggle-maximize-window(win.id);
+        }
         moved(dx, dy) => {
             root.move-window(win.id, dx, dy);
         }
@@ -217,9 +269,11 @@ export component Desktop inherits Window {
     Panel {
         clock-time: root.clock-time;
         windows: root.windows;
-        x: parent.width - self.width;
-        y: 0;
-        height: parent.height;
+        horizontal: root.panel-edge >= 2;
+        width: root.panel-edge >= 2 ? parent.width : root.panel-size;
+        height: root.panel-edge >= 2 ? root.panel-size : parent.height;
+        x: root.panel-edge == 0 ? parent.width - root.panel-size : 0px;
+        y: root.panel-edge == 3 ? parent.height - root.panel-size : 0px;
         toggle-launcher => {
             root.launcher-visible = !root.launcher-visible;
         }
@@ -250,6 +304,8 @@ export component Desktop inherits Window {
         y: 0;
         width: parent.width;
         height: parent.height;
+        panel-edge <=> root.panel-edge;
+        panel-size <=> root.panel-size;
         change-background => {
             root.settings-visible = false;
             root.change-background();
