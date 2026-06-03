@@ -49,10 +49,12 @@ component TrayStrip {
     }
 }
 
-// A single icon button in the panel.
+// A single icon button in the panel, with a hover tooltip.
 component PanelButton inherits Rectangle {
     in property <string> icon;
     in property <color> icon-color: Theme.fg;
+    in property <string> tooltip;
+    in property <int> edge;   // 0=Right 1=Left 2=Top 3=Bottom
     callback clicked();
     border-radius: 8px;
     background: ta.has-hover ? Theme.surface : Theme.panel;
@@ -66,6 +68,29 @@ component PanelButton inherits Rectangle {
     ta := TouchArea {
         clicked => {
             root.clicked();
+        }
+    }
+
+    // Tooltip bubble, placed toward the screen interior from the panel edge.
+    if ta.has-hover && root.tooltip != "": Rectangle {
+        width: tip.preferred-width + 16px;
+        height: tip.preferred-height + 10px;
+        background: Theme.bg;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.hover;
+        x: root.edge == 0 ? -self.width - 8px
+            : root.edge == 1 ? root.width + 8px
+            : (root.width - self.width) / 2;
+        y: root.edge == 2 ? root.height + 8px
+            : root.edge == 3 ? -self.height - 8px
+            : (root.height - self.height) / 2;
+        tip := Text {
+            text: root.tooltip;
+            color: Theme.fg;
+            font-size: 12px;
+            x: 8px;
+            y: 5px;
         }
     }
 }
@@ -142,6 +167,7 @@ component WorkspaceSwitcher {
 // docked left/right, horizontally when docked top/bottom.
 export component Panel inherits Rectangle {
     in property <bool> horizontal;
+    in property <int> edge;   // 0=Right 1=Left 2=Top 3=Bottom (for tooltip placement)
     in property <[WindowTile]> windows;
     in property <string> clock-hours;
     in property <string> clock-minutes;
@@ -171,24 +197,32 @@ export component Panel inherits Rectangle {
             icon: "⊞";
             icon-color: Theme.accent;
             height: 40px;
+            tooltip: "Start menu";
+            edge: root.edge;
             clicked => { root.toggle-start-menu(); }
         }
         for app in root.launchers: PanelButton {
             icon: app.icon;
             icon-color: #e6b34d;
             height: 40px;
+            tooltip: app.name;
+            edge: root.edge;
             clicked => { root.launch(app.command); }
         }
         PanelButton {
             icon: "⚙";
             icon-color: #f9e2af;
             height: 40px;
+            tooltip: "Settings";
+            edge: root.edge;
             clicked => { root.toggle-settings(); }
         }
         PanelButton {
             icon: root.muted ? "🔇" : "🔊";
             icon-color: Theme.fg;
             height: 40px;
+            tooltip: "Sound & network";
+            edge: root.edge;
             clicked => { root.toggle-quick-settings(); }
         }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; clicked => { root.toggle-calendar(); } }
@@ -228,24 +262,32 @@ export component Panel inherits Rectangle {
             icon: "⊞";
             icon-color: Theme.accent;
             width: 40px;
+            tooltip: "Start menu";
+            edge: root.edge;
             clicked => { root.toggle-start-menu(); }
         }
         for app in root.launchers: PanelButton {
             icon: app.icon;
             icon-color: #e6b34d;
             width: 40px;
+            tooltip: app.name;
+            edge: root.edge;
             clicked => { root.launch(app.command); }
         }
         PanelButton {
             icon: "⚙";
             icon-color: #f9e2af;
             width: 40px;
+            tooltip: "Settings";
+            edge: root.edge;
             clicked => { root.toggle-settings(); }
         }
         PanelButton {
             icon: root.muted ? "🔇" : "🔊";
             icon-color: Theme.fg;
             width: 40px;
+            tooltip: "Sound & network";
+            edge: root.edge;
             clicked => { root.toggle-quick-settings(); }
         }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; clicked => { root.toggle-calendar(); } }

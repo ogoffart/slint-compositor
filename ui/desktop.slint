@@ -516,6 +516,7 @@ export component Desktop inherits Window {
         launchers: root.panel-launchers;
         muted: root.muted;
         horizontal: root.panel-edge >= 2;
+        edge: root.panel-edge;
         width: root.panel-edge >= 2 ? parent.width : root.panel-size;
         height: root.panel-edge >= 2 ? root.panel-size : parent.height;
         x: root.panel-edge == 0 ? parent.width - root.panel-size : 0px;
