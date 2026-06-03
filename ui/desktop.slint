@@ -259,6 +259,9 @@ export component Desktop inherits Window {
     in property <bool> lock-has-password;
     in-out property <bool> lock-wrong: false;
     callback logout();
+    callback suspend();
+    callback reboot();
+    callback shutdown();
     callback unlock(string);
 
     // File dialog state (driven from Rust).
@@ -532,6 +535,18 @@ export component Desktop inherits Window {
             root.start-menu-visible = false;
             root.lock-wrong = false;
             root.locked = true;
+        }
+        suspend => {
+            root.start-menu-visible = false;
+            root.suspend();
+        }
+        reboot => {
+            root.start-menu-visible = false;
+            root.reboot();
+        }
+        shutdown => {
+            root.start-menu-visible = false;
+            root.shutdown();
         }
         logout => {
             root.logout();

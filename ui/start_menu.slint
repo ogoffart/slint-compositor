@@ -46,6 +46,9 @@ export component StartMenu inherits Rectangle {
     callback launch(string);
     callback run();
     callback lock();
+    callback suspend();
+    callback reboot();
+    callback shutdown();
     callback logout();
     callback dismiss();
 
@@ -113,9 +116,30 @@ export component StartMenu inherits Rectangle {
                 }
             }
             MenuRow {
+                icon: "☾";
+                label: "Suspend";
+                clicked => {
+                    root.suspend();
+                }
+            }
+            MenuRow {
+                icon: "↻";
+                label: "Restart";
+                clicked => {
+                    root.reboot();
+                }
+            }
+            MenuRow {
                 icon: "⏻";
-                label: "Log out";
+                label: "Shut down";
                 icon-color: #f38ba8;
+                clicked => {
+                    root.shutdown();
+                }
+            }
+            MenuRow {
+                icon: "⇲";
+                label: "Log out";
                 clicked => {
                     root.logout();
                 }

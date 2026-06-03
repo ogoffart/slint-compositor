@@ -21,6 +21,7 @@ mod keybind;
 mod network;
 mod notify;
 mod portal;
+mod session;
 mod volume;
 use gl_bridge::{Frame, GlBridge};
 
@@ -323,11 +324,15 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Start menu: log out quits the compositor.
+    // Start menu: log out quits the compositor; suspend/restart/shutdown go to
+    // logind.
     desktop.on_logout(|| {
         log::info!("logout requested; quitting");
         let _ = slint::quit_event_loop();
     });
+    desktop.on_suspend(|| session::request(session::PowerAction::Suspend));
+    desktop.on_reboot(|| session::request(session::PowerAction::Reboot));
+    desktop.on_shutdown(|| session::request(session::PowerAction::PowerOff));
 
     // Quick settings: volume via PulseAudio/PipeWire (libpulse).
     let (vol_rx, vol_cmd_tx) = match volume::spawn() {
