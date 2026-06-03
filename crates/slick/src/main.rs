@@ -11,9 +11,24 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 
 use chrono::Local;
-use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
+
+mod gl_bridge;
+use gl_bridge::{Frame, GlBridge};
 
 slint::include_modules!();
+
+/// Shared UI-thread state touched by both the event pump and the rendering
+/// notifier.
+#[derive(Default)]
+struct Windows {
+    /// window id -> row index in the model.
+    rows: HashMap<u64, usize>,
+    /// Latest frame per window awaiting GPU upload (drained in the notifier).
+    pending: HashMap<u64, Frame>,
+    /// Windows removed since the last frame, whose textures must be freed.
+    closed: Vec<u64>,
+}
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -31,6 +46,55 @@ fn main() -> anyhow::Result<()> {
 
     let desktop = Desktop::new()?;
 
+    let model = Rc::new(VecModel::<WindowTile>::default());
+    desktop.set_windows(ModelRc::from(model.clone()));
+    let windows = Rc::new(RefCell::new(Windows::default()));
+    let bridge = Rc::new(RefCell::new(GlBridge::default()));
+    let socket_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+
+    // Upload client frames into shared GL textures during rendering, where the
+    // GL context is current, and hand them to Slint as borrowed textures.
+    desktop
+        .window()
+        .set_rendering_notifier({
+            let bridge = bridge.clone();
+            let windows = windows.clone();
+            let model = model.clone();
+            move |state, graphics_api| match state {
+                slint::RenderingState::RenderingSetup => {
+                    if let slint::GraphicsAPI::NativeOpenGL { get_proc_address } = graphics_api {
+                        bridge.borrow_mut().init(get_proc_address);
+                    }
+                }
+                slint::RenderingState::BeforeRendering => {
+                    let mut bridge = bridge.borrow_mut();
+                    if !bridge.ready() {
+                        return;
+                    }
+                    let mut windows = windows.borrow_mut();
+                    for id in std::mem::take(&mut windows.closed) {
+                        bridge.remove(id);
+                    }
+                    let frames: Vec<(u64, Frame)> = windows.pending.drain().collect();
+                    for (id, frame) in frames {
+                        let Some(image) = bridge.upload(id, &frame) else {
+                            continue;
+                        };
+                        if let Some(&row) = windows.rows.get(&id) {
+                            if let Some(mut tile) = model.row_data(row) {
+                                tile.texture = image;
+                                tile.width = frame.width as f32;
+                                tile.height = frame.height as f32;
+                                model.set_row_data(row, tile);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        })
+        .unwrap_or_else(|err| log::error!("could not set rendering notifier: {err:?}"));
+
     // Close button on a window's server-side decoration.
     desktop.on_close_window({
         let cmd_tx = cmd_tx.clone();
@@ -40,15 +104,6 @@ fn main() -> anyhow::Result<()> {
             ));
         }
     });
-
-    // Model backing the composited client windows.
-    let windows = Rc::new(VecModel::<WindowTile>::default());
-    desktop.set_windows(ModelRc::from(windows.clone()));
-    // window id -> row index in the model.
-    let rows: Rc<RefCell<HashMap<u64, usize>>> = Rc::new(RefCell::new(HashMap::new()));
-
-    // The WAYLAND_DISPLAY our compositor created, learned from Event::Ready.
-    let socket_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
 
     // Launcher: run an arbitrary command, pointed at our compositor socket.
     desktop.on_launch({
@@ -76,12 +131,19 @@ fn main() -> anyhow::Result<()> {
     // Drain compositor events on the UI thread.
     let event_timer = slint::Timer::default();
     event_timer.start(slint::TimerMode::Repeated, Duration::from_millis(16), {
-        let socket_name = socket_name.clone();
+        let weak = desktop.as_weak();
         let windows = windows.clone();
-        let rows = rows.clone();
+        let model = model.clone();
+        let socket_name = socket_name.clone();
         move || {
+            let mut dirty = false;
             while let Ok(event) = rx.try_recv() {
-                handle_event(event, &windows, &rows, &socket_name);
+                dirty |= handle_event(event, &model, &windows, &socket_name);
+            }
+            if dirty {
+                if let Some(d) = weak.upgrade() {
+                    d.window().request_redraw();
+                }
             }
         }
     });
@@ -90,17 +152,19 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Apply a compositor event. Returns true if a redraw is needed.
 fn handle_event(
     event: slick_wayland::Event,
-    windows: &Rc<VecModel<WindowTile>>,
-    rows: &Rc<RefCell<HashMap<u64, usize>>>,
+    model: &Rc<VecModel<WindowTile>>,
+    windows: &Rc<RefCell<Windows>>,
     socket_name: &Rc<RefCell<Option<String>>>,
-) {
+) -> bool {
     use slick_wayland::Event;
     match event {
         Event::Ready { socket_name: name } => {
             log::info!("compositor ready on WAYLAND_DISPLAY={name}");
             *socket_name.borrow_mut() = Some(name);
+            false
         }
         Event::WindowBuffer {
             id,
@@ -109,54 +173,55 @@ fn handle_event(
             pixels,
             title,
         } => {
-            let texture = make_image(width, height, &pixels);
-            let mut rows = rows.borrow_mut();
-            if let Some(&row) = rows.get(&id.0) {
-                if let Some(mut tile) = windows.row_data(row) {
-                    tile.texture = texture;
+            let mut windows = windows.borrow_mut();
+            if let Some(&row) = windows.rows.get(&id.0) {
+                if let Some(mut tile) = model.row_data(row) {
                     tile.title = title.into();
-                    tile.width = width as f32;
-                    tile.height = height as f32;
-                    windows.set_row_data(row, tile);
+                    model.set_row_data(row, tile);
                 }
             } else {
-                let row = windows.row_count();
+                let row = model.row_count();
                 let offset = 40.0 + row as f32 * 40.0;
-                windows.push(WindowTile {
+                model.push(WindowTile {
                     id: id.0 as i32,
-                    texture,
+                    texture: slint::Image::default(),
                     title: title.into(),
                     x: offset,
                     y: offset,
                     width: width as f32,
                     height: height as f32,
                 });
-                rows.insert(id.0, row);
+                windows.rows.insert(id.0, row);
             }
+            windows.pending.insert(
+                id.0,
+                Frame {
+                    width,
+                    height,
+                    pixels,
+                },
+            );
+            true
         }
         Event::WindowRemoved(id) => {
-            let mut rows = rows.borrow_mut();
-            if let Some(removed) = rows.remove(&id.0) {
-                windows.remove(removed);
-                // Keep the id->row map consistent after the shift.
-                for row in rows.values_mut() {
+            let mut windows = windows.borrow_mut();
+            windows.pending.remove(&id.0);
+            if let Some(removed) = windows.rows.remove(&id.0) {
+                model.remove(removed);
+                for row in windows.rows.values_mut() {
                     if *row > removed {
                         *row -= 1;
                     }
                 }
+                windows.closed.push(id.0);
             }
+            true
         }
-        other => log::info!("compositor event: {other:?}"),
+        other => {
+            log::info!("compositor event: {other:?}");
+            false
+        }
     }
-}
-
-/// Build a Slint image from tightly-packed RGBA8 pixels.
-fn make_image(width: u32, height: u32, pixels: &[u8]) -> slint::Image {
-    let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width, height);
-    let bytes = buffer.make_mut_bytes();
-    let n = bytes.len().min(pixels.len());
-    bytes[..n].copy_from_slice(&pixels[..n]);
-    slint::Image::from_rgba8(buffer)
 }
 
 /// Spawn a shell command detached, with `WAYLAND_DISPLAY` pointed at our

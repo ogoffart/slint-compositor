@@ -11,9 +11,10 @@ and the main event loop** (via its own `backend-winit` for nested development an
 protocol engine** — it manages clients, surfaces, buffers, `xdg-shell`,
 `wlr-layer-shell` and the seat, but does not present anything itself.
 
-Client windows are imported into GL textures and shown as Slint `Image`s; the
-panel, taskbar and tray are ordinary Slint UI in the same scene. This keeps the
-whole desktop in one Slint scene graph.
+Client windows are imported into GL textures (owned by slick, shared with the
+Skia renderer as borrowed textures) and shown as Slint `Image`s; the panel,
+taskbar and tray are ordinary Slint UI in the same scene. This keeps the whole
+desktop in one Slint scene graph.
 
 ```
 ┌──────────────── main thread (Slint) ─────────────────┐
@@ -41,11 +42,20 @@ The Slint UI lives in `ui/` (`desktop.slint`, `panel.slint`, `clock.slint`).
 
 ## Status
 
-Early scaffolding. The compositor advertises the core Wayland globals
-(`wl_compositor`, `xdg_shell`, `wl_shm`, `wl_seat`, outputs) on an auto-selected
-socket, and the Slint panel docks to the right edge with a live clock. Client
-window rendering, input forwarding, taskbar, tray and virtual-desktop switching
-are tracked as milestones M2–M10 (see the project plan).
+Working today (verified nested under Xvfb + llvmpipe):
+
+- Compositor advertises the core globals (`wl_compositor`, `xdg_shell`,
+  `wl_shm`, `wl_seat`, a virtual `wl_output`) on an auto-selected socket.
+- Client windows are composited into the Slint scene. Their `wl_shm` buffers
+  are uploaded into **GL textures we own and share with Slint's renderer** via
+  `BorrowedOpenGLTextureBuilder` (rendered with the **Skia** OpenGL renderer).
+  Frame callbacks are throttled to ~60Hz.
+- **Server-side decorations**: slick forces `zxdg-decoration` ServerSide and
+  draws the title bar (title + close button) and border itself.
+- Right-edge panel with a live clock and a **command launcher** (▶).
+
+Input forwarding, taskbar, tray and virtual-desktop switching are the next
+milestones (M3–M10; see the project plan). Bare metal uses `backend-linuxkms`.
 
 ## Building & running
 

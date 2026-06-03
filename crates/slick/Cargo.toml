@@ -16,6 +16,7 @@ slick-shell.workspace = true
 slick-render.workspace = true
 slick-tray.workspace = true
 slint.workspace = true
+glow.workspace = true
 chrono.workspace = true
 log.workspace = true
 env_logger.workspace = true
