@@ -1,15 +1,98 @@
 import { Theme } from "theme.slint";
-import { Button, SpinBox } from "std-widgets.slint";
+import { Button, SpinBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { MenuEntry } from "types.slint";
 
-// Settings dialog: colour scheme, accent, panel placement/size, background.
+// One editable shortcut row: icon, name, command and a remove button. Edits are
+// pushed straight into the backing model (field 0=icon, 1=name, 2=command).
+component ShortcutRow inherits HorizontalLayout {
+    in property <MenuEntry> entry;
+    in property <int> list;
+    in property <int> index;
+    callback set(int, int, int, string);
+    callback remove(int, int);
+    spacing: 6px;
+    height: 32px;
+    LineEdit {
+        width: 46px;
+        text: root.entry.icon;
+        edited(t) => { root.set(root.list, root.index, 0, t); }
+    }
+    LineEdit {
+        width: 120px;
+        text: root.entry.name;
+        placeholder-text: "Name";
+        edited(t) => { root.set(root.list, root.index, 1, t); }
+    }
+    LineEdit {
+        horizontal-stretch: 1;
+        text: root.entry.command;
+        placeholder-text: "command";
+        edited(t) => { root.set(root.list, root.index, 2, t); }
+    }
+    Rectangle {
+        width: 30px;
+        border-radius: 6px;
+        background: rm.has-hover ? #f38ba8 : Theme.surface;
+        Text {
+            text: "✕";
+            color: rm.has-hover ? #11111b : Theme.fg;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        rm := TouchArea {
+            clicked => { root.remove(root.list, root.index); }
+        }
+    }
+}
+
+// A titled, editable list of shortcuts with an Add button.
+component ShortcutSection inherits VerticalLayout {
+    in property <string> title;
+    in property <int> list;
+    in property <[MenuEntry]> entries;
+    callback set(int, int, int, string);
+    callback add(int);
+    callback remove(int, int);
+    spacing: 6px;
+    Text {
+        text: root.title;
+        color: Theme.fg;
+        font-size: 13px;
+        font-weight: 600;
+    }
+    for entry[i] in root.entries: ShortcutRow {
+        entry: entry;
+        list: root.list;
+        index: i;
+        set(l, idx, f, v) => { root.set(l, idx, f, v); }
+        remove(l, idx) => { root.remove(l, idx); }
+    }
+    HorizontalLayout {
+        alignment: start;
+        Button {
+            text: "+ Add";
+            clicked => { root.add(root.list); }
+        }
+    }
+}
+
+// Settings dialog: a General tab (scheme, accent, panel, background) and a
+// Shortcuts tab to edit the start-menu, desktop and panel launchers.
 export component Settings inherits Rectangle {
     in-out property <int> panel-edge;     // 0=Right 1=Left 2=Top 3=Bottom
     in-out property <length> panel-size;
+    in property <[MenuEntry]> menu-entries;
+    in property <[MenuEntry]> desktop-entries;
+    in property <[MenuEntry]> panel-entries;
     callback change-background();
     callback changed();                   // any setting changed (triggers a save)
+    callback shortcut-set(int, int, int, string);   // list, index, field, value
+    callback shortcut-add(int);
+    callback shortcut-remove(int, int);
     callback close();
 
     property <[color]> accents: [#89b4fa, #a6e3a1, #f38ba8, #f9e2af, #cba6f7, #94e2d5];
+    in-out property <int> tab;
 
     background: Theme.overlay;
 
@@ -20,8 +103,8 @@ export component Settings inherits Rectangle {
     }
 
     Rectangle {
-        width: 460px;
-        height: 420px;
+        width: 560px;
+        height: 540px;
         background: Theme.bg;
         border-radius: 10px;
         border-width: 1px;
@@ -40,133 +123,188 @@ export component Settings inherits Rectangle {
                 font-weight: 700;
             }
 
-            // Colour scheme.
+            // Tab bar.
             HorizontalLayout {
                 spacing: 8px;
-                Text {
-                    text: "Colour scheme";
-                    color: Theme.fg;
-                    vertical-alignment: center;
+                for label[i] in ["General", "Shortcuts"]: Rectangle {
                     width: 110px;
-                }
-                for label[i] in ["Dark", "Light"]: Rectangle {
-                    height: 30px;
-                    border-radius: 6px;
-                    background: (Theme.dark == (i == 0)) ? Theme.accent : Theme.surface;
+                    height: 32px;
+                    border-radius: 7px;
+                    background: root.tab == i ? Theme.accent : Theme.surface;
                     Text {
                         text: label;
-                        color: Theme.fg;
-                        font-size: 12px;
+                        color: root.tab == i ? #ffffff : Theme.fg;
+                        font-size: 13px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                     TouchArea {
-                        clicked => {
-                            Theme.dark = (i == 0);
-                            root.changed();
-                        }
+                        clicked => { root.tab = i; }
                     }
                 }
             }
 
-            // Accent colour.
-            HorizontalLayout {
-                spacing: 8px;
-                Text {
-                    text: "Accent";
-                    color: Theme.fg;
-                    vertical-alignment: center;
-                    width: 110px;
-                }
-                for swatch in root.accents: Rectangle {
-                    height: 30px;
-                    border-radius: 6px;
-                    background: swatch;
-                    border-width: Theme.accent == swatch ? 2px : 0px;
-                    border-color: Theme.fg;
-                    TouchArea {
-                        clicked => {
-                            Theme.accent = swatch;
-                            root.changed();
-                        }
-                    }
-                }
-            }
+            // --- General tab ---------------------------------------------------
+            if root.tab == 0: VerticalLayout {
+                spacing: 14px;
 
-            // Panel edge.
-            HorizontalLayout {
-                spacing: 8px;
-                Text {
-                    text: "Panel edge";
-                    color: Theme.fg;
-                    vertical-alignment: center;
-                    width: 110px;
-                }
-                for label[i] in ["Right", "Left", "Top", "Bottom"]: Rectangle {
-                    height: 30px;
-                    border-radius: 6px;
-                    background: root.panel-edge == i ? Theme.accent : Theme.surface;
+                HorizontalLayout {
+                    spacing: 8px;
                     Text {
-                        text: label;
+                        text: "Colour scheme";
                         color: Theme.fg;
-                        font-size: 12px;
-                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: 110px;
+                    }
+                    for label[i] in ["Dark", "Light"]: Rectangle {
+                        height: 30px;
+                        border-radius: 6px;
+                        background: (Theme.dark == (i == 0)) ? Theme.accent : Theme.surface;
+                        Text {
+                            text: label;
+                            color: Theme.fg;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea {
+                            clicked => {
+                                Theme.dark = (i == 0);
+                                root.changed();
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Accent";
+                        color: Theme.fg;
+                        vertical-alignment: center;
+                        width: 110px;
+                    }
+                    for swatch in root.accents: Rectangle {
+                        height: 30px;
+                        border-radius: 6px;
+                        background: swatch;
+                        border-width: Theme.accent == swatch ? 2px : 0px;
+                        border-color: Theme.fg;
+                        TouchArea {
+                            clicked => {
+                                Theme.accent = swatch;
+                                root.changed();
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Panel edge";
+                        color: Theme.fg;
+                        vertical-alignment: center;
+                        width: 110px;
+                    }
+                    for label[i] in ["Right", "Left", "Top", "Bottom"]: Rectangle {
+                        height: 30px;
+                        border-radius: 6px;
+                        background: root.panel-edge == i ? Theme.accent : Theme.surface;
+                        Text {
+                            text: label;
+                            color: Theme.fg;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea {
+                            clicked => {
+                                root.panel-edge = i;
+                                root.changed();
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Panel size";
+                        color: Theme.fg;
+                        vertical-alignment: center;
+                        width: 110px;
+                    }
+                    SpinBox {
+                        horizontal-stretch: 1;
+                        minimum: 40;
+                        maximum: 240;
+                        step-size: 8;
+                        value: round(root.panel-size / 1px);
+                        edited(v) => {
+                            root.panel-size = v * 1px;
+                            root.changed();
+                        }
+                    }
+                    Text {
+                        text: "px";
+                        color: Theme.fg;
                         vertical-alignment: center;
                     }
-                    TouchArea {
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text {
+                        text: "Background image";
+                        color: Theme.fg;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "Change…";
                         clicked => {
-                            root.panel-edge = i;
-                            root.changed();
+                            root.change-background();
                         }
                     }
                 }
+
+                Rectangle { vertical-stretch: 1; }
             }
 
-            // Panel size.
-            HorizontalLayout {
-                spacing: 8px;
-                Text {
-                    text: "Panel size";
-                    color: Theme.fg;
-                    vertical-alignment: center;
-                    width: 110px;
-                }
-                SpinBox {
-                    horizontal-stretch: 1;
-                    minimum: 40;
-                    maximum: 240;
-                    step-size: 8;
-                    value: round(root.panel-size / 1px);
-                    edited(v) => {
-                        root.panel-size = v * 1px;
-                        root.changed();
+            // --- Shortcuts tab -------------------------------------------------
+            if root.tab == 1: ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 16px;
+                    padding-right: 8px;
+                    alignment: start;
+                    ShortcutSection {
+                        title: "Start menu";
+                        list: 0;
+                        entries: root.menu-entries;
+                        set(l, i, f, v) => { root.shortcut-set(l, i, f, v); }
+                        add(l) => { root.shortcut-add(l); }
+                        remove(l, i) => { root.shortcut-remove(l, i); }
                     }
-                }
-                Text {
-                    text: "px";
-                    color: Theme.fg;
-                    vertical-alignment: center;
-                }
-            }
-
-            // Background.
-            HorizontalLayout {
-                spacing: 10px;
-                Text {
-                    text: "Background image";
-                    color: Theme.fg;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                Button {
-                    text: "Change…";
-                    clicked => {
-                        root.change-background();
+                    ShortcutSection {
+                        title: "Desktop icons";
+                        list: 1;
+                        entries: root.desktop-entries;
+                        set(l, i, f, v) => { root.shortcut-set(l, i, f, v); }
+                        add(l) => { root.shortcut-add(l); }
+                        remove(l, i) => { root.shortcut-remove(l, i); }
+                    }
+                    ShortcutSection {
+                        title: "Panel launchers";
+                        list: 2;
+                        entries: root.panel-entries;
+                        set(l, i, f, v) => { root.shortcut-set(l, i, f, v); }
+                        add(l) => { root.shortcut-add(l); }
+                        remove(l, i) => { root.shortcut-remove(l, i); }
                     }
                 }
             }
-
-            Rectangle { vertical-stretch: 1; }
 
             HorizontalLayout {
                 alignment: end;

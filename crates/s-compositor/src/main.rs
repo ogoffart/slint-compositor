@@ -73,26 +73,10 @@ fn main() -> anyhow::Result<()> {
     let bg_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(loaded.background.clone()));
     apply_config(&desktop, &loaded);
 
-    // Start-menu apps: use the configured list, or auto-discover defaults.
-    let menu_apps: Rc<Vec<config::AppEntry>> = Rc::new(if loaded.menu.is_empty() {
-        config::discover_default_apps()
-    } else {
-        loaded.menu.clone()
-    });
-    desktop.set_menu_entries(ModelRc::from(Rc::new(VecModel::from(
-        menu_apps
-            .iter()
-            .map(|a| MenuEntry {
-                icon: a.icon.clone().into(),
-                name: a.name.clone().into(),
-                command: a.command.clone().into(),
-                kind: "app".into(),
-            })
-            .collect::<Vec<_>>(),
-    ))));
-
-    // Desktop shortcuts and panel quick-launch buttons (configurable; seeded
-    // with sensible defaults when the config doesn't specify any).
+    // Launcher lists — the start menu, desktop shortcut icons and panel
+    // quick-launch buttons — are live, editable models (the Settings "Shortcuts"
+    // tab mutates them in place). Each uses the configured entries, or seeded
+    // defaults when the config specifies none.
     let to_entries = |apps: &[config::AppEntry]| {
         apps.iter()
             .map(|a| MenuEntry {
@@ -103,12 +87,17 @@ fn main() -> anyhow::Result<()> {
             })
             .collect::<Vec<_>>()
     };
-    let desktop_apps: Rc<Vec<config::AppEntry>> = Rc::new(if loaded.desktop.is_empty() {
+    let menu_seed = if loaded.menu.is_empty() {
+        config::discover_default_apps()
+    } else {
+        loaded.menu.clone()
+    };
+    let desktop_seed = if loaded.desktop.is_empty() {
         config::discover_shortcuts()
     } else {
         loaded.desktop.clone()
-    });
-    let panel_apps: Rc<Vec<config::AppEntry>> = Rc::new(if loaded.panel_apps.is_empty() {
+    };
+    let panel_seed = if loaded.panel_apps.is_empty() {
         vec![config::AppEntry {
             icon: "🗂".to_string(),
             name: "Files".to_string(),
@@ -116,24 +105,24 @@ fn main() -> anyhow::Result<()> {
         }]
     } else {
         loaded.panel_apps.clone()
-    });
-    desktop.set_desktop_icons(ModelRc::from(Rc::new(VecModel::from(to_entries(
-        &desktop_apps,
-    )))));
-    desktop.set_panel_launchers(ModelRc::from(Rc::new(VecModel::from(to_entries(
-        &panel_apps,
-    )))));
+    };
+    let menu_model = Rc::new(VecModel::from(to_entries(&menu_seed)));
+    let desktop_model = Rc::new(VecModel::from(to_entries(&desktop_seed)));
+    let panel_model = Rc::new(VecModel::from(to_entries(&panel_seed)));
+    desktop.set_menu_entries(ModelRc::from(menu_model.clone()));
+    desktop.set_desktop_icons(ModelRc::from(desktop_model.clone()));
+    desktop.set_panel_launchers(ModelRc::from(panel_model.clone()));
     desktop.set_terminal_command(config::terminal_command().into());
 
-    // App launcher: filter the app list as the query changes.
+    // App launcher: filter the (live) start-menu list as the query changes.
     let launcher_model = Rc::new(VecModel::<MenuEntry>::default());
     desktop.set_launcher_results(ModelRc::from(launcher_model.clone()));
     desktop.on_launcher_query({
-        let menu_apps = menu_apps.clone();
+        let menu_model = menu_model.clone();
         let launcher_model = launcher_model.clone();
         move |query| {
             let q = query.to_lowercase();
-            let results: Vec<MenuEntry> = menu_apps
+            let results: Vec<MenuEntry> = menu_model
                 .iter()
                 .filter(|a| {
                     q.is_empty()
@@ -141,12 +130,6 @@ fn main() -> anyhow::Result<()> {
                         || a.command.to_lowercase().contains(&q)
                 })
                 .take(8)
-                .map(|a| MenuEntry {
-                    icon: a.icon.clone().into(),
-                    name: a.name.clone().into(),
-                    command: a.command.clone().into(),
-                    kind: "app".into(),
-                })
                 .collect();
             launcher_model.set_vec(results);
         }
@@ -262,17 +245,11 @@ fn main() -> anyhow::Result<()> {
         let file_dialog = file_dialog.clone();
         let weak = desktop.as_weak();
         let bg_path = bg_path.clone();
-        let menu_apps = menu_apps.clone();
-        let desktop_apps = desktop_apps.clone();
-        let panel_apps = panel_apps.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
         move || {
             let weak = weak.clone();
             let bg_path = bg_path.clone();
-            let menu_apps = menu_apps.clone();
-            let desktop_apps = desktop_apps.clone();
-            let panel_apps = panel_apps.clone();
             let lock_password = lock_password.clone();
             let keybinds = keybinds.clone();
             file_dialog.borrow_mut().open(
@@ -285,16 +262,7 @@ fn main() -> anyhow::Result<()> {
                             Ok(image) => {
                                 d.set_background_image(image);
                                 *bg_path.borrow_mut() = Some(path.to_string_lossy().into_owned());
-                                current_config(
-                                    &d,
-                                    &bg_path,
-                                    &menu_apps,
-                                    &desktop_apps,
-                                    &panel_apps,
-                                    &lock_password,
-                                    &keybinds,
-                                )
-                                .save();
+                                current_config(&d, &bg_path, &lock_password, &keybinds).save();
                             }
                             Err(err) => log::error!("failed to load image {path:?}: {err}"),
                         }
@@ -309,27 +277,89 @@ fn main() -> anyhow::Result<()> {
         let weak = desktop.as_weak();
         let bg_path = bg_path.clone();
         let appearance_tx = appearance_tx.clone();
-        let menu_apps = menu_apps.clone();
-        let desktop_apps = desktop_apps.clone();
-        let panel_apps = panel_apps.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
         move || {
             if let Some(d) = weak.upgrade() {
-                current_config(
-                    &d,
-                    &bg_path,
-                    &menu_apps,
-                    &desktop_apps,
-                    &panel_apps,
-                    &lock_password,
-                    &keybinds,
-                )
-                .save();
+                current_config(&d, &bg_path, &lock_password, &keybinds).save();
                 let _ = appearance_tx.try_send(current_appearance(&d));
             }
         }
     });
+
+    // Shortcut editing (Settings "Shortcuts" tab). Mutating a model updates the
+    // start menu / desktop icons / panel live; each edit re-saves the config.
+    desktop.on_shortcut_set({
+        let (menu, desk, pan) = (menu_model.clone(), desktop_model.clone(), panel_model.clone());
+        let weak = desktop.as_weak();
+        let bg_path = bg_path.clone();
+        let lock_password = lock_password.clone();
+        let keybinds = keybinds.clone();
+        move |list, index, field, value| {
+            let model = match list {
+                1 => &desk,
+                2 => &pan,
+                _ => &menu,
+            };
+            if let Some(mut e) = model.row_data(index as usize) {
+                match field {
+                    0 => e.icon = value,
+                    1 => e.name = value,
+                    2 => e.command = value,
+                    _ => {}
+                }
+                model.set_row_data(index as usize, e);
+            }
+            if let Some(d) = weak.upgrade() {
+                current_config(&d, &bg_path, &lock_password, &keybinds).save();
+            }
+        }
+    });
+    desktop.on_shortcut_add({
+        let (menu, desk, pan) = (menu_model.clone(), desktop_model.clone(), panel_model.clone());
+        let weak = desktop.as_weak();
+        let bg_path = bg_path.clone();
+        let lock_password = lock_password.clone();
+        let keybinds = keybinds.clone();
+        move |list| {
+            let model = match list {
+                1 => &desk,
+                2 => &pan,
+                _ => &menu,
+            };
+            model.push(MenuEntry {
+                icon: "📁".into(),
+                name: "New".into(),
+                command: String::new().into(),
+                kind: "app".into(),
+            });
+            if let Some(d) = weak.upgrade() {
+                current_config(&d, &bg_path, &lock_password, &keybinds).save();
+            }
+        }
+    });
+    desktop.on_shortcut_remove({
+        let (menu, desk, pan) = (menu_model.clone(), desktop_model.clone(), panel_model.clone());
+        let weak = desktop.as_weak();
+        let bg_path = bg_path.clone();
+        let lock_password = lock_password.clone();
+        let keybinds = keybinds.clone();
+        move |list, index| {
+            let model = match list {
+                1 => &desk,
+                2 => &pan,
+                _ => &menu,
+            };
+            let i = index as usize;
+            if i < model.row_count() {
+                model.remove(i);
+            }
+            if let Some(d) = weak.upgrade() {
+                current_config(&d, &bg_path, &lock_password, &keybinds).save();
+            }
+        }
+    });
+
     desktop.on_fd_entry_clicked({
         let file_dialog = file_dialog.clone();
         move |idx| file_dialog.borrow_mut().entry_clicked(idx)
@@ -1417,26 +1447,35 @@ fn apply_config(d: &Desktop, c: &config::Config) {
 }
 
 /// Read the current settings out of the UI, carrying over the non-UI bits
-/// (start-menu apps and lock password) so saving doesn't drop them.
+/// (lock password, keybinds) so saving doesn't drop them. The launcher lists are
+/// read back from their live models, which the Settings dialog edits in place.
 fn current_config(
     d: &Desktop,
     bg: &Rc<RefCell<Option<String>>>,
-    menu: &Rc<Vec<config::AppEntry>>,
-    desktop: &Rc<Vec<config::AppEntry>>,
-    panel_apps: &Rc<Vec<config::AppEntry>>,
     lock_password: &Rc<RefCell<String>>,
     keybinds: &Rc<Vec<keybind::Keybind>>,
 ) -> config::Config {
     let theme = d.global::<Theme>();
+    let read = |model: ModelRc<MenuEntry>| -> Vec<config::AppEntry> {
+        model
+            .iter()
+            .filter(|e| !e.command.is_empty())
+            .map(|e| config::AppEntry {
+                icon: e.icon.to_string(),
+                name: e.name.to_string(),
+                command: e.command.to_string(),
+            })
+            .collect()
+    };
     config::Config {
         dark: theme.get_dark(),
         accent: color_to_u32(theme.get_accent()),
         panel_edge: d.get_panel_edge(),
         panel_size: d.get_panel_size(),
         background: bg.borrow().clone(),
-        menu: (**menu).clone(),
-        desktop: (**desktop).clone(),
-        panel_apps: (**panel_apps).clone(),
+        menu: read(d.get_menu_entries()),
+        desktop: read(d.get_desktop_icons()),
+        panel_apps: read(d.get_panel_launchers()),
         lock_password: lock_password.borrow().clone(),
         keybinds: (**keybinds).clone(),
     }
@@ -1968,12 +2007,20 @@ mod shot {
                     .collect::<Vec<_>>(),
             )))
         };
+        d.set_menu_entries(model(vec![
+            ("🌐", "Firefox", "firefox"),
+            ("🖥", "Terminal", "alacritty"),
+        ]));
         d.set_desktop_icons(model(vec![
             ("🗂", "Files", "s-files"),
             ("🖥", "Terminal", "alacritty"),
             ("🌐", "Browser", "firefox"),
         ]));
         d.set_panel_launchers(model(vec![("🗂", "Files", "s-files")]));
+        if std::env::var("SCOMP_SHOT_SETTINGS").is_ok() {
+            d.set_settings_visible(true);
+            d.set_settings_tab(1);
+        }
         d.show().unwrap();
         window.window().request_redraw();
 
