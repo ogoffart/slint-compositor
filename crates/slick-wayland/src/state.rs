@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use smithay::input::{Seat, SeatState};
+use smithay::output::Output;
 use smithay::reexports::calloop::LoopSignal;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::wl_callback::WlCallback;
@@ -13,6 +14,7 @@ use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 
@@ -28,11 +30,13 @@ pub struct SlickState {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub xdg_decoration_state: XdgDecorationState,
     pub shm_state: ShmState,
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<SlickState>,
     pub data_device_state: DataDeviceState,
     pub seat: Seat<SlickState>,
+    pub output: Output,
 
     pub workspaces: Workspaces,
     pub next_window_id: u64,
@@ -68,6 +72,17 @@ impl SlickState {
     /// Milliseconds since startup, for frame-callback timestamps.
     pub fn millis_since_start(&self) -> u32 {
         self.start_time.elapsed().as_millis() as u32
+    }
+
+    /// Apply a command from the UI thread.
+    pub fn handle_command(&mut self, command: crate::Command) {
+        match command {
+            crate::Command::CloseWindow(id) => {
+                if let Some(entry) = self.windows.values().find(|e| e.id == id) {
+                    entry.toplevel.send_close();
+                }
+            }
+        }
     }
 }
 

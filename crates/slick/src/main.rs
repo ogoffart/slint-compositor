@@ -20,15 +20,26 @@ fn main() -> anyhow::Result<()> {
 
     // Spawn the Wayland compositor on its own thread.
     let (tx, rx) = channel::<slick_wayland::Event>();
+    let (cmd_tx, cmd_rx) = slick_wayland::command_channel();
     std::thread::Builder::new()
         .name("slick-wayland".into())
         .spawn(move || {
-            if let Err(err) = slick_wayland::run(tx) {
+            if let Err(err) = slick_wayland::run(tx, cmd_rx) {
                 log::error!("wayland thread exited: {err:?}");
             }
         })?;
 
     let desktop = Desktop::new()?;
+
+    // Close button on a window's server-side decoration.
+    desktop.on_close_window({
+        let cmd_tx = cmd_tx.clone();
+        move |id| {
+            let _ = cmd_tx.send(slick_wayland::Command::CloseWindow(
+                slick_wayland::WindowId(id as u64),
+            ));
+        }
+    });
 
     // Model backing the composited client windows.
     let windows = Rc::new(VecModel::<WindowTile>::default());
@@ -96,12 +107,14 @@ fn handle_event(
             width,
             height,
             pixels,
+            title,
         } => {
             let texture = make_image(width, height, &pixels);
             let mut rows = rows.borrow_mut();
             if let Some(&row) = rows.get(&id.0) {
                 if let Some(mut tile) = windows.row_data(row) {
                     tile.texture = texture;
+                    tile.title = title.into();
                     tile.width = width as f32;
                     tile.height = height as f32;
                     windows.set_row_data(row, tile);
@@ -112,6 +125,7 @@ fn handle_event(
                 windows.push(WindowTile {
                     id: id.0 as i32,
                     texture,
+                    title: title.into(),
                     x: offset,
                     y: offset,
                     width: width as f32,

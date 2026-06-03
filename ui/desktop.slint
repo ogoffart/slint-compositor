@@ -1,18 +1,88 @@
 import { Panel } from "panel.slint";
 import { Launcher } from "launcher.slint";
 
-// A composited client window: its current frame plus geometry.
+// A composited client window: its current frame, title and geometry.
 export struct WindowTile {
     id: int,
     texture: image,
+    title: string,
     x: length,
     y: length,
     width: length,
     height: length,
 }
 
+// Server-side decoration drawn around a client window: a title bar with the
+// window title and a close button, plus a border. The client content sits below.
+component WindowFrame inherits Rectangle {
+    in property <WindowTile> tile;
+    callback close();
+
+    x: tile.x;
+    y: tile.y;
+    width: tile.width;
+    height: tile.height + 28px;
+    border-width: 1px;
+    border-color: #45475a;
+    background: #313244;
+
+    VerticalLayout {
+        // Title bar.
+        Rectangle {
+            height: 28px;
+            background: #313244;
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 4px;
+                spacing: 4px;
+
+                Text {
+                    text: tile.title == "" ? "(untitled)" : tile.title;
+                    color: #cdd6f4;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                Rectangle {
+                    width: 22px;
+                    y: 3px;
+                    height: 22px;
+                    border-radius: 4px;
+                    background: close-ta.has-hover ? #f38ba8 : transparent;
+
+                    Text {
+                        text: "✕";
+                        color: close-ta.has-hover ? #11111b : #cdd6f4;
+                        font-size: 13px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    close-ta := TouchArea {
+                        clicked => {
+                            root.close();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Client content.
+        Image {
+            source: tile.texture;
+            width: tile.width;
+            height: tile.height;
+            image-fit: fill;
+            image-rendering: pixelated;
+        }
+    }
+}
+
 // Root scene. The area left of the panel is the composited client-window
-// layer (Slint `Image`s backed by the clients' committed buffers).
+// layer; each window is drawn with server-side decorations.
 export component Desktop inherits Window {
     in property <string> clock-time;
     in property <[WindowTile]> windows;
@@ -20,21 +90,19 @@ export component Desktop inherits Window {
 
     // Emitted when the user submits a command in the launcher.
     callback launch(string);
+    // Emitted when the user clicks a window's close button.
+    callback close-window(int);
 
     preferred-width: 1280px;
     preferred-height: 800px;
     title: "slick";
     background: #1e1e2e;
 
-    // Client windows, composited under the panel.
-    for win in root.windows: Image {
-        source: win.texture;
-        x: win.x;
-        y: win.y;
-        width: win.width;
-        height: win.height;
-        image-fit: fill;
-        image-rendering: pixelated;
+    for win in root.windows: WindowFrame {
+        tile: win;
+        close => {
+            root.close-window(win.id);
+        }
     }
 
     Panel {

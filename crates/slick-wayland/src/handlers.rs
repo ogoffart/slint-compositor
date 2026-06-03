@@ -28,9 +28,12 @@ use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
 };
 use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTarget};
+use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    XdgToplevelSurfaceData,
 };
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::{
     delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
@@ -76,6 +79,12 @@ fn extract_commit(
     callbacks: &mut Vec<WlCallback>,
 ) -> Option<Event> {
     with_states(surface, |states| {
+        let title = states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().unwrap().title.clone())
+            .unwrap_or_default();
+
         let mut guard = states.cached_state.get::<SurfaceAttributes>();
         let attrs = guard.current();
 
@@ -98,6 +107,7 @@ fn extract_commit(
                 width,
                 height,
                 pixels,
+                title,
             }),
             Ok(None) => {
                 log::debug!("window {id:?}: unsupported shm format");
@@ -198,6 +208,31 @@ impl XdgShellHandler for SlickState {
     }
 }
 
+impl XdgDecorationHandler for SlickState {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        // slick draws decorations itself, so always advertise server-side.
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(DecorationMode::ServerSide);
+        });
+        toplevel.send_configure();
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
+        // We only ever do server-side decorations, regardless of the request.
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(DecorationMode::ServerSide);
+        });
+        toplevel.send_configure();
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(DecorationMode::ServerSide);
+        });
+        toplevel.send_configure();
+    }
+}
+
 impl SeatHandler for SlickState {
     type KeyboardFocus = WlSurface;
     type PointerFocus = WlSurface;
@@ -243,6 +278,7 @@ impl OutputHandler for SlickState {}
 delegate_compositor!(SlickState);
 delegate_shm!(SlickState);
 delegate_xdg_shell!(SlickState);
+smithay::delegate_xdg_decoration!(SlickState);
 delegate_seat!(SlickState);
 delegate_output!(SlickState);
 delegate_data_device!(SlickState);

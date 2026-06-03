@@ -48,7 +48,28 @@ pub enum Event {
         width: u32,
         height: u32,
         pixels: Vec<u8>,
+        title: String,
     },
+}
+
+/// Commands sent from the UI thread to the compositor thread.
+#[derive(Debug, Clone)]
+pub enum Command {
+    /// Ask a window to close (sends `xdg_toplevel.close`).
+    CloseWindow(WindowId),
+}
+
+/// Re-exported so the UI crate can hold the sending half.
+pub use smithay::reexports::calloop::channel::Sender as CommandSender;
+
+/// Create the command channel. The [`CommandSender`] stays on the UI thread;
+/// the [`Channel`](smithay::reexports::calloop::channel::Channel) is handed to
+/// [`run`].
+pub fn command_channel() -> (
+    CommandSender<Command>,
+    smithay::reexports::calloop::channel::Channel<Command>,
+) {
+    smithay::reexports::calloop::channel::channel()
 }
 
 impl std::fmt::Debug for Event {
@@ -67,12 +88,17 @@ impl std::fmt::Debug for Event {
                 .finish(),
             // Don't dump the pixel buffer.
             Event::WindowBuffer {
-                id, width, height, ..
+                id,
+                width,
+                height,
+                title,
+                ..
             } => f
                 .debug_struct("WindowBuffer")
                 .field("id", id)
                 .field("width", width)
                 .field("height", height)
+                .field("title", title)
                 .finish(),
         }
     }
@@ -80,7 +106,10 @@ impl std::fmt::Debug for Event {
 
 /// Run the Wayland compositor event loop. Intended to be called on a dedicated
 /// thread; blocks until the loop is torn down.
-pub fn run(events: Sender<Event>) -> anyhow::Result<()> {
+pub fn run(
+    events: Sender<Event>,
+    commands: smithay::reexports::calloop::channel::Channel<Command>,
+) -> anyhow::Result<()> {
     let mut event_loop: EventLoop<SlickState> =
         EventLoop::try_new().context("failed to create calloop event loop")?;
     let display: Display<SlickState> = Display::new().context("failed to create wl_display")?;
@@ -88,6 +117,8 @@ pub fn run(events: Sender<Event>) -> anyhow::Result<()> {
 
     let compositor_state = CompositorState::new::<SlickState>(&dh);
     let xdg_shell_state = XdgShellState::new::<SlickState>(&dh);
+    let xdg_decoration_state =
+        smithay::wayland::shell::xdg::decoration::XdgDecorationState::new::<SlickState>(&dh);
     let shm_state = ShmState::new::<SlickState>(&dh, Vec::new());
     let output_manager_state = OutputManagerState::new_with_xdg_output::<SlickState>(&dh);
     let mut seat_state = SeatState::<SlickState>::new();
@@ -98,16 +129,37 @@ pub fn run(events: Sender<Event>) -> anyhow::Result<()> {
         .context("failed to add keyboard to seat")?;
     seat.add_pointer();
 
+    // Advertise a single virtual output; many clients (e.g. foot) refuse to map
+    // without one.
+    let output = smithay::output::Output::new(
+        "slick-0".into(),
+        smithay::output::PhysicalProperties {
+            size: (0, 0).into(),
+            subpixel: smithay::output::Subpixel::Unknown,
+            make: "slick".into(),
+            model: "virtual".into(),
+        },
+    );
+    output.create_global::<SlickState>(&dh);
+    let mode = smithay::output::Mode {
+        size: (1280, 720).into(),
+        refresh: 60_000,
+    };
+    output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
+    output.set_preferred(mode);
+
     let mut state = SlickState {
         display_handle: dh.clone(),
         loop_signal: event_loop.get_signal(),
         compositor_state,
         xdg_shell_state,
+        xdg_decoration_state,
         shm_state,
         output_manager_state,
         seat_state,
         data_device_state,
         seat,
+        output,
         workspaces: Workspaces::new(WORKSPACE_COUNT),
         next_window_id: 0,
         windows: std::collections::HashMap::new(),
@@ -147,6 +199,15 @@ pub fn run(events: Sender<Event>) -> anyhow::Result<()> {
             },
         )
         .map_err(|e| anyhow::anyhow!("failed to insert display source: {e}"))?;
+
+    // Apply commands coming from the UI thread.
+    handle
+        .insert_source(commands, |event, _, state: &mut SlickState| {
+            if let smithay::reexports::calloop::channel::Event::Msg(command) = event {
+                state.handle_command(command);
+            }
+        })
+        .map_err(|e| anyhow::anyhow!("failed to insert command source: {e}"))?;
 
     // Fire queued frame callbacks at ~60Hz so clients pace their rendering to
     // roughly display rate instead of busy-looping.
