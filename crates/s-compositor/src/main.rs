@@ -19,6 +19,7 @@ mod gl_bridge;
 mod icons;
 mod network;
 mod portal;
+mod volume;
 use gl_bridge::{Frame, GlBridge};
 
 slint::include_modules!();
@@ -315,10 +316,27 @@ fn main() -> anyhow::Result<()> {
         let _ = slint::quit_event_loop();
     });
 
-    // Quick settings: volume (stub until the PipeWire backend lands) ...
-    desktop.set_volume(50.0);
-    desktop.on_set_volume(|v| log::info!("set volume {v}"));
-    desktop.on_toggle_mute(|| log::info!("toggle mute"));
+    // Quick settings: volume via PulseAudio/PipeWire (libpulse).
+    let (vol_rx, vol_cmd_tx) = match volume::spawn() {
+        Some((rx, tx)) => (Some(rx), Some(tx)),
+        None => (None, None),
+    };
+    desktop.on_set_volume({
+        let tx = vol_cmd_tx.clone();
+        move |v| {
+            if let Some(tx) = &tx {
+                let _ = tx.send(volume::VolCommand::Set(v));
+            }
+        }
+    });
+    desktop.on_toggle_mute({
+        let tx = vol_cmd_tx.clone();
+        move || {
+            if let Some(tx) = &tx {
+                let _ = tx.send(volume::VolCommand::ToggleMute);
+            }
+        }
+    });
 
     // ... and Wi-Fi via NetworkManager.
     let wifi_model = Rc::new(VecModel::<WifiNetwork>::default());
@@ -567,6 +585,17 @@ fn main() -> anyhow::Result<()> {
                 while let Ok(event) = rx.try_recv() {
                     if let Some(d) = weak.upgrade() {
                         apply_net_event(event, &d, &wifi_model);
+                        dirty = true;
+                    }
+                }
+            }
+
+            // Drain volume updates.
+            if let Some(rx) = &vol_rx {
+                while let Ok(event) = rx.try_recv() {
+                    if let Some(d) = weak.upgrade() {
+                        d.set_volume(event.volume);
+                        d.set_muted(event.muted);
                         dirty = true;
                     }
                 }

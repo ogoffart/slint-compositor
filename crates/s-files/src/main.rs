@@ -126,11 +126,16 @@ mod screenshot {
         let mut rgba = Vec::with_capacity(buffer.len() * 4);
         for p in &buffer {
             let a = p.alpha;
-            let unp = |c: u8| if a == 0 || a == 255 { c } else { ((c as u16 * 255) / a as u16) as u8 };
+            let unp = |c: u8| {
+                if a == 0 || a == 255 {
+                    c
+                } else {
+                    ((c as u16 * 255) / a as u16) as u8
+                }
+            };
             rgba.extend_from_slice(&[unp(p.red), unp(p.green), unp(p.blue), a]);
         }
-        image::save_buffer(&out, &rgba, w, h, image::ExtendedColorType::Rgba8)
-            .expect("encode png");
+        image::save_buffer(&out, &rgba, w, h, image::ExtendedColorType::Rgba8).expect("encode png");
         eprintln!("wrote {out} ({w}x{h})");
 
         files.hide().unwrap();

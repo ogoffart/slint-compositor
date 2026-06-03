@@ -103,11 +103,7 @@ impl Browser {
     }
 
     pub fn activate_selected(&mut self) {
-        let sel = self
-            .weak
-            .upgrade()
-            .map(|w| w.get_selected())
-            .unwrap_or(-1);
+        let sel = self.weak.upgrade().map(|w| w.get_selected()).unwrap_or(-1);
         if sel >= 0 {
             self.activate(sel);
         }
@@ -204,7 +200,9 @@ impl Browser {
             let size = if is_dir {
                 "—".to_string()
             } else {
-                meta.as_ref().map(|m| human_size(m.len())).unwrap_or_default()
+                meta.as_ref()
+                    .map(|m| human_size(m.len()))
+                    .unwrap_or_default()
             };
             let modified = meta
                 .as_ref()
@@ -249,11 +247,7 @@ impl Browser {
 /// Launch a file with the system default handler, detached from this process.
 fn launch(path: &Path) {
     use std::process::{Command, Stdio};
-    let opener = if which("xdg-open") {
-        "xdg-open"
-    } else {
-        "gio"
-    };
+    let opener = if which("xdg-open") { "xdg-open" } else { "gio" };
     let mut cmd = Command::new(opener);
     if opener == "gio" {
         cmd.arg("open");
@@ -382,7 +376,10 @@ mod tests {
         assert_eq!(file_kind(Path::new("a.mp3"), false), "audio");
         assert_eq!(file_kind(Path::new("main.rs"), false), "code");
         assert_eq!(file_kind(Path::new("a.pdf"), false), "pdf");
-        assert_eq!(file_kind(Path::new("/nonexistent/unknown.xyz"), false), "file");
+        assert_eq!(
+            file_kind(Path::new("/nonexistent/unknown.xyz"), false),
+            "file"
+        );
     }
 
     #[test]

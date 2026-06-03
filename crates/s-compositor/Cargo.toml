@@ -23,6 +23,7 @@ env_logger.workspace = true
 anyhow.workspace = true
 zbus = "5"
 async-channel = "2"
+libpulse-binding = "2.30.1"
 
 [build-dependencies]
 slint-build.workspace = true

@@ -102,7 +102,7 @@ On Debian/Ubuntu:
 
 ```sh
 sudo apt install build-essential clang libxkbcommon-dev libfontconfig-1-dev \
-    libudev-dev libseat-dev libinput-dev libgbm-dev libdrm-dev
+    libudev-dev libseat-dev libinput-dev libgbm-dev libdrm-dev libpulse-dev
 ```
 
 The `libudev`/`libseat`/`libinput`/`libgbm`/`libdrm` packages are needed because

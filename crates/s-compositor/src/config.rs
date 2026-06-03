@@ -102,7 +102,9 @@ pub fn discover_default_apps() -> Vec<AppEntry> {
     // File manager: prefer our own `s-files` browser (found next to the
     // compositor binary, so it works straight from the build tree), falling back
     // to a system file manager.
-    if let Some(command) = bundled("s-files").or_else(|| on_path("s-files").then(|| "s-files".to_string())) {
+    if let Some(command) =
+        bundled("s-files").or_else(|| on_path("s-files").then(|| "s-files".to_string()))
+    {
         apps.push(AppEntry {
             icon: "📁".to_string(),
             name: "Files".to_string(),
