@@ -43,6 +43,8 @@ pub enum Event {
         /// The directory the socket lives in; launched apps need this as their
         /// `XDG_RUNTIME_DIR` to find it.
         runtime_dir: String,
+        /// The output (monitor) layout the compositor advertises.
+        outputs: Vec<OutputInfo>,
     },
     WindowAdded(WindowId),
     WindowRemoved(WindowId),
@@ -102,6 +104,64 @@ pub enum Event {
 pub const OUTPUT_W: i32 = 1280;
 pub const OUTPUT_H: i32 = 800;
 
+/// One output (monitor) in the layout: a name and a position + size in the
+/// global compositor coordinate space.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutputInfo {
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+/// The output layout. Read from `S_COMPOSITOR_OUTPUTS` (e.g.
+/// `1280x800+0+0;1280x800+1280+0` for two side-by-side monitors); defaults to a
+/// single `OUTPUT_W`x`OUTPUT_H` output at the origin.
+pub fn output_layout() -> Vec<OutputInfo> {
+    if let Ok(spec) = std::env::var("S_COMPOSITOR_OUTPUTS") {
+        let outs: Vec<OutputInfo> = spec
+            .split([';', ','])
+            .enumerate()
+            .filter_map(|(i, part)| parse_output(part.trim(), i))
+            .collect();
+        if !outs.is_empty() {
+            return outs;
+        }
+    }
+    vec![OutputInfo {
+        name: "s-compositor-0".into(),
+        x: 0,
+        y: 0,
+        w: OUTPUT_W,
+        h: OUTPUT_H,
+    }]
+}
+
+/// Parse one `WxH+X+Y` (or bare `WxH`) output specification.
+fn parse_output(spec: &str, idx: usize) -> Option<OutputInfo> {
+    let (size, pos) = match spec.split_once('+') {
+        Some((s, p)) => (s, Some(p)),
+        None => (spec, None),
+    };
+    let (w, h) = size.split_once('x')?;
+    let (w, h) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
+    let (x, y) = match pos {
+        Some(p) => {
+            let (x, y) = p.split_once('+')?;
+            (x.trim().parse().ok()?, y.trim().parse().ok()?)
+        }
+        None => (0, 0),
+    };
+    Some(OutputInfo {
+        name: format!("s-compositor-{idx}"),
+        x,
+        y,
+        w,
+        h,
+    })
+}
+
 /// Commands sent from the UI thread to the compositor thread.
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -152,10 +212,12 @@ impl std::fmt::Debug for Event {
             Event::Ready {
                 socket_name,
                 runtime_dir,
+                outputs,
             } => f
                 .debug_struct("Ready")
                 .field("socket_name", socket_name)
                 .field("runtime_dir", runtime_dir)
+                .field("outputs", outputs)
                 .finish(),
             Event::WindowAdded(id) => f.debug_tuple("WindowAdded").field(id).finish(),
             Event::WindowRemoved(id) => f.debug_tuple("WindowRemoved").field(id).finish(),
@@ -265,24 +327,32 @@ pub fn run(
         .context("failed to add keyboard to seat")?;
     seat.add_pointer();
 
-    // Advertise a single virtual output; many clients (e.g. foot) refuse to map
-    // without one.
-    let output = smithay::output::Output::new(
-        "s-compositor-0".into(),
-        smithay::output::PhysicalProperties {
-            size: (0, 0).into(),
-            subpixel: smithay::output::Subpixel::Unknown,
-            make: "s-compositor".into(),
-            model: "virtual".into(),
-        },
-    );
-    output.create_global::<SlickState>(&dh);
-    let mode = smithay::output::Mode {
-        size: (OUTPUT_W, OUTPUT_H).into(),
-        refresh: 60_000,
-    };
-    output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
-    output.set_preferred(mode);
+    // Advertise the configured output layout (at least one; many clients refuse
+    // to map without an output). Each entry becomes a `wl_output` global the
+    // compositor positions at its place in the global coordinate space.
+    let layout = output_layout();
+    let mut outputs = Vec::new();
+    for cfg in &layout {
+        let output = smithay::output::Output::new(
+            cfg.name.clone(),
+            smithay::output::PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: smithay::output::Subpixel::Unknown,
+                make: "s-compositor".into(),
+                model: "virtual".into(),
+            },
+        );
+        output.create_global::<SlickState>(&dh);
+        let mode = smithay::output::Mode {
+            size: (cfg.w, cfg.h).into(),
+            refresh: 60_000,
+        };
+        output.change_current_state(Some(mode), None, None, Some((cfg.x, cfg.y).into()));
+        output.set_preferred(mode);
+        outputs.push(output);
+    }
+    // The first output is the primary, used where a single output is expected.
+    let output = outputs[0].clone();
 
     let mut state = SlickState {
         display_handle: dh.clone(),
@@ -299,6 +369,7 @@ pub fn run(
         primary_selection_state,
         seat,
         output,
+        outputs,
         workspaces: Workspaces::new(WORKSPACE_COUNT),
         next_window_id: 0,
         windows: std::collections::HashMap::new(),
@@ -386,6 +457,7 @@ pub fn run(
     let _ = events.send(Event::Ready {
         socket_name: socket_name.clone(),
         runtime_dir: runtime_dir.clone(),
+        outputs: layout.clone(),
     });
 
     event_loop

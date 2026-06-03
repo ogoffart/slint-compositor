@@ -35,6 +35,15 @@ export struct FileItem {
     selected: bool,
 }
 
+// One output (monitor) region in the global layout. The shell renders a panel
+// and wallpaper per output.
+export struct OutputRect {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
+
 // A shortcut shown in the Files sidebar (Home, XDG dirs, the filesystem root).
 export struct Place {
     name: string,

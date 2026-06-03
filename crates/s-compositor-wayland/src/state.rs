@@ -43,6 +43,8 @@ pub struct SlickState {
     pub primary_selection_state: PrimarySelectionState,
     pub seat: Seat<SlickState>,
     pub output: Output,
+    /// All advertised outputs (kept alive so their `wl_output` globals persist).
+    pub outputs: Vec<Output>,
 
     pub workspaces: Workspaces,
     pub next_window_id: u64,
