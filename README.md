@@ -68,6 +68,8 @@ Working today (verified nested under Xvfb + llvmpipe):
   quick-settings flyout.
 - A **notification daemon** (`org.freedesktop.Notifications`) with on-screen
   popups.
+- **XWayland**: X11 apps run via a rootless XWayland server with a built-in X11
+  window manager (shm clients; `DISPLAY` is set for launched apps).
 - **Configurable global keyboard shortcuts** (see below).
 
 Bare metal uses `backend-linuxkms`.

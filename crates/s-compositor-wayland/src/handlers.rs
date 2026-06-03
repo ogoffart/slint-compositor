@@ -140,6 +140,30 @@ impl CompositorHandler for SlickState {
             return;
         }
 
+        // X11 (XWayland) window?
+        if let Some(entry) = self.x11_windows.get(&root) {
+            let id = entry.id;
+            let title = entry.surface.title();
+            let app_id = entry.surface.class();
+            let decorated = !entry.surface.is_override_redirect();
+            let mut cache = std::mem::take(&mut self.surface_pixels);
+            let buffer = composite_tree(&root, &mut cache, &mut callbacks);
+            self.surface_pixels = cache;
+            self.pending_callbacks.append(&mut callbacks);
+            if let Some((width, height, pixels)) = buffer {
+                let _ = self.events.send(Event::WindowBuffer {
+                    id,
+                    width,
+                    height,
+                    pixels,
+                    title,
+                    app_id,
+                    decorated,
+                });
+            }
+            return;
+        }
+
         // Unknown root (e.g. a surface that hasn't taken an xdg/layer role yet,
         // or an orphan subsurface). Still drain this surface's frame callbacks so
         // the client isn't left blocked.

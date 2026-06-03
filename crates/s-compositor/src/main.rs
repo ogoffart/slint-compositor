@@ -966,6 +966,12 @@ fn handle_event(
             }
             true
         }
+        Event::XwaylandReady { display } => {
+            // X11 apps launched from now on inherit this (see spawn_command).
+            std::env::set_var("S_COMPOSITOR_XDISPLAY", format!(":{display}"));
+            log::info!("XWayland ready: DISPLAY=:{display}");
+            false
+        }
         other => {
             log::info!("compositor event: {other:?}");
             false
@@ -1722,6 +1728,11 @@ fn spawn_command(cmd: &str, wayland: Option<(&str, &str)>) {
     // back to X.
     command.env_remove("WAYLAND_SOCKET");
     command.env_remove("DISPLAY");
+    // Point X11 apps at our XWayland display (set once XWayland is ready), so
+    // they fall back to X while Wayland apps still prefer WAYLAND_DISPLAY.
+    if let Ok(x_display) = std::env::var("S_COMPOSITOR_XDISPLAY") {
+        command.env("DISPLAY", x_display);
+    }
     if let Some((display, runtime_dir)) = wayland {
         command.env("WAYLAND_DISPLAY", display);
         command.env("XDG_RUNTIME_DIR", runtime_dir);

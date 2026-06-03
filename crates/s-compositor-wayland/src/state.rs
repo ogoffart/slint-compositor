@@ -54,6 +54,13 @@ pub struct SlickState {
     /// Mapped layer-shell surfaces (bars, wallpapers), keyed by `wl_surface`.
     pub layer_surfaces: HashMap<WlSurface, LayerEntry>,
 
+    /// XWayland window manager (created once XWayland signals it is ready).
+    pub xwm: Option<smithay::xwayland::X11Wm>,
+    /// xwayland-shell global, used to associate X11 windows with `wl_surface`s.
+    pub xwayland_shell_state: smithay::wayland::xwayland_shell::XWaylandShellState,
+    /// Mapped X11 windows, keyed by their associated `wl_surface`.
+    pub x11_windows: HashMap<WlSurface, X11Entry>,
+
     /// Last-known RGBA8 contents of every live surface (window roots and their
     /// subsurfaces), keyed by `wl_surface`. Used to flatten a surface tree into
     /// a single buffer on commit, so a subsurface that doesn't re-attach a buffer
@@ -69,6 +76,12 @@ pub struct SlickState {
 
     /// Outbound channel used to notify the UI thread of shell events.
     pub events: std::sync::mpsc::Sender<Event>,
+}
+
+/// A tracked X11 (XWayland) window.
+pub struct X11Entry {
+    pub id: WindowId,
+    pub surface: smithay::xwayland::X11Surface,
 }
 
 /// A tracked toplevel window.
@@ -127,6 +140,12 @@ impl SlickState {
                     .values()
                     .find(|e| e.id == id)
                     .map(|e| e.surface.wl_surface().clone())
+            })
+            .or_else(|| {
+                self.x11_windows
+                    .values()
+                    .find(|e| e.id == id)
+                    .and_then(|e| e.surface.wl_surface())
             })
     }
 

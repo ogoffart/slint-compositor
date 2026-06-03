@@ -25,6 +25,7 @@ mod handlers;
 mod input;
 mod state;
 mod workspace;
+mod xwayland;
 
 pub use s_compositor_shell::WindowId;
 pub use state::SlickState;
@@ -46,6 +47,10 @@ pub enum Event {
     WindowAdded(WindowId),
     WindowRemoved(WindowId),
     WindowTitleChanged(WindowId, String),
+    /// XWayland is up; X11 apps should be launched with `DISPLAY=:{display}`.
+    XwaylandReady {
+        display: u32,
+    },
     /// The client asked to (un)maximize itself; the shell decides the geometry.
     WindowMaximizeRequested {
         id: WindowId,
@@ -154,6 +159,10 @@ impl std::fmt::Debug for Event {
                 .finish(),
             Event::WindowAdded(id) => f.debug_tuple("WindowAdded").field(id).finish(),
             Event::WindowRemoved(id) => f.debug_tuple("WindowRemoved").field(id).finish(),
+            Event::XwaylandReady { display } => f
+                .debug_struct("XwaylandReady")
+                .field("display", display)
+                .finish(),
             Event::WindowMaximizeRequested { id, maximized } => f
                 .debug_struct("WindowMaximizeRequested")
                 .field("id", id)
@@ -248,6 +257,8 @@ pub fn run(
         smithay::wayland::selection::primary_selection::PrimarySelectionState::new::<SlickState>(
             &dh,
         );
+    let xwayland_shell_state =
+        smithay::wayland::xwayland_shell::XWaylandShellState::new::<SlickState>(&dh);
 
     let mut seat = seat_state.new_wl_seat(&dh, "seat0");
     seat.add_keyboard(Default::default(), 200, 25)
@@ -292,6 +303,9 @@ pub fn run(
         windows: std::collections::HashMap::new(),
         popups: std::collections::HashMap::new(),
         layer_surfaces: std::collections::HashMap::new(),
+        xwm: None,
+        xwayland_shell_state,
+        x11_windows: std::collections::HashMap::new(),
         surface_pixels: std::collections::HashMap::new(),
         start_time: std::time::Instant::now(),
         pending_callbacks: Vec::new(),
@@ -363,6 +377,9 @@ pub fn run(
             },
         )
         .map_err(|e| anyhow::anyhow!("failed to insert frame timer: {e}"))?;
+
+    // Start XWayland so X11 apps can run (best-effort; needs the Xwayland binary).
+    xwayland::setup(&handle, &dh);
 
     log::info!("s-compositor listening on {runtime_dir}/{socket_name}");
     let _ = events.send(Event::Ready {
