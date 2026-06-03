@@ -46,6 +46,48 @@ component TaskItem inherits Rectangle {
     }
 }
 
+// Virtual-desktop switcher: a strip of numbered buttons.
+component WorkspaceSwitcher {
+    in property <int> active;
+    in property <bool> horizontal;
+    callback switch(int);
+    property <[int]> indices: [0, 1, 2, 3];
+
+    if root.horizontal: HorizontalLayout {
+        spacing: 4px;
+        for i in root.indices: Rectangle {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: i == root.active ? Theme.accent : Theme.surface;
+            Text {
+                text: "\{i + 1}";
+                color: Theme.fg;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { clicked => { root.switch(i); } }
+        }
+    }
+    if !root.horizontal: VerticalLayout {
+        spacing: 4px;
+        for i in root.indices: Rectangle {
+            height: 26px;
+            border-radius: 6px;
+            background: i == root.active ? Theme.accent : Theme.surface;
+            Text {
+                text: "\{i + 1}";
+                color: Theme.fg;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { clicked => { root.switch(i); } }
+        }
+    }
+}
+
 // The shell panel. Lays its content out along its long axis: vertically when
 // docked left/right, horizontally when docked top/bottom.
 export component Panel inherits Rectangle {
@@ -55,9 +97,12 @@ export component Panel inherits Rectangle {
     in property <string> clock-minutes;
     in property <length> cursor-x;
     in property <length> cursor-y;
+    in property <int> active-workspace;
+    in property <int> workspace-count: 4;
     callback toggle-launcher();
     callback toggle-settings();
     callback activate(int);
+    callback switch-workspace(int);
 
     background: Theme.panel;
 
@@ -78,6 +123,12 @@ export component Panel inherits Rectangle {
         }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
+        Rectangle { height: 1px; background: Theme.surface; }
+        WorkspaceSwitcher {
+            active: root.active-workspace;
+            horizontal: false;
+            switch(n) => { root.switch-workspace(n); }
+        }
         Rectangle { height: 1px; background: Theme.surface; }
         VerticalLayout {
             vertical-stretch: 1;
@@ -109,6 +160,12 @@ export component Panel inherits Rectangle {
         }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
+        Rectangle { width: 1px; background: Theme.surface; }
+        WorkspaceSwitcher {
+            active: root.active-workspace;
+            horizontal: true;
+            switch(n) => { root.switch-workspace(n); }
+        }
         Rectangle { width: 1px; background: Theme.surface; }
         HorizontalLayout {
             horizontal-stretch: 1;

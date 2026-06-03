@@ -16,15 +16,16 @@ component WindowFrame inherits Rectangle {
     callback moved(length, length);              // title-bar drag delta
     callback resized(length, length);            // resize-grip drag delta
     callback focus-requested();                  // raise + focus
+    in property <bool> on-active-workspace: true;
 
-    visible: !tile.minimized;
+    visible: !tile.minimized && on-active-workspace;
     // pointer: surface-local x, y, kind (0=move,1=down,2=up), button (0..3)
     callback pointer(float, float, int, int);
     // cursor-moved: pointer position in window coordinates (for the eyes applet)
     callback cursor-moved(length, length);
     callback scroll(float, float);
-    // key: text, pressed, ctrl, alt, shift
-    callback key(string, bool, bool, bool, bool);
+    // key: text, pressed, ctrl, alt, shift, meta
+    callback key(string, bool, bool, bool, bool, bool);
 
     x: tile.x;
     y: tile.y;
@@ -127,11 +128,11 @@ component WindowFrame inherits Rectangle {
         // Client content + input.
         fs := FocusScope {
             key-pressed(e) => {
-                root.key(e.text, true, e.modifiers.control, e.modifiers.alt, e.modifiers.shift);
+                root.key(e.text, true, e.modifiers.control, e.modifiers.alt, e.modifiers.shift, e.modifiers.meta);
                 accept
             }
             key-released(e) => {
-                root.key(e.text, false, e.modifiers.control, e.modifiers.alt, e.modifiers.shift);
+                root.key(e.text, false, e.modifiers.control, e.modifiers.alt, e.modifiers.shift, e.modifiers.meta);
                 accept
             }
 
@@ -205,6 +206,8 @@ export component Desktop inherits Window {
     in property <image> background-image;
     in-out property <int> panel-edge: 0;        // 0=Right 1=Left 2=Top 3=Bottom
     in-out property <length> panel-size: 72px;
+    in-out property <int> active-workspace: 0;
+    in property <int> workspace-count: 4;
     in-out property <bool> launcher-visible: false;
     in-out property <bool> settings-visible: false;
 
@@ -224,7 +227,7 @@ export component Desktop inherits Window {
     callback resize-window(int, length, length);
     callback pointer-window(int, float, float, int, int);
     callback scroll-window(int, float, float);
-    callback key-window(int, string, bool, bool, bool, bool);
+    callback key-window(int, string, bool, bool, bool, bool, bool);
     callback change-background();
     callback fd-entry-clicked(int);
     callback fd-go-up();
@@ -273,6 +276,7 @@ export component Desktop inherits Window {
 
     for win in root.windows: WindowFrame {
         tile: win;
+        on-active-workspace: win.workspace == root.active-workspace;
         close => {
             root.close-window(win.id);
         }
@@ -301,8 +305,8 @@ export component Desktop inherits Window {
         scroll(dx, dy) => {
             root.scroll-window(win.id, dx, dy);
         }
-        key(text, pressed, ctrl, alt, shift) => {
-            root.key-window(win.id, text, pressed, ctrl, alt, shift);
+        key(text, pressed, ctrl, alt, shift, meta) => {
+            root.key-window(win.id, text, pressed, ctrl, alt, shift, meta);
         }
     }
 
@@ -312,6 +316,8 @@ export component Desktop inherits Window {
         cursor-x: root.cursor-x;
         cursor-y: root.cursor-y;
         windows: root.windows;
+        active-workspace: root.active-workspace;
+        workspace-count: root.workspace-count;
         horizontal: root.panel-edge >= 2;
         width: root.panel-edge >= 2 ? parent.width : root.panel-size;
         height: root.panel-edge >= 2 ? root.panel-size : parent.height;
@@ -325,6 +331,9 @@ export component Desktop inherits Window {
         }
         activate(id) => {
             root.activate-window(id);
+        }
+        switch-workspace(n) => {
+            root.active-workspace = n;
         }
     }
 
