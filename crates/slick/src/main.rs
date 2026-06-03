@@ -28,6 +28,8 @@ struct Windows {
     pending: HashMap<u64, Frame>,
     /// Windows removed since the last frame, whose textures must be freed.
     closed: Vec<u64>,
+    /// The currently focused window.
+    focused: Option<u64>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -116,6 +118,97 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Raise + focus a window (taskbar click or clicking the window).
+    desktop.on_activate_window({
+        let cmd_tx = cmd_tx.clone();
+        let model = model.clone();
+        let windows = windows.clone();
+        move |id| {
+            raise_and_focus(&model, &windows, id as u64);
+            let _ = cmd_tx.send(slick_wayland::Command::FocusWindow(
+                slick_wayland::WindowId(id as u64),
+            ));
+        }
+    });
+
+    // Move a window by dragging its title bar.
+    desktop.on_move_window({
+        let model = model.clone();
+        let windows = windows.clone();
+        move |id, dx, dy| {
+            let windows = windows.borrow();
+            if let Some(&row) = windows.rows.get(&(id as u64)) {
+                if let Some(mut tile) = model.row_data(row) {
+                    tile.x += dx;
+                    tile.y += dy;
+                    model.set_row_data(row, tile);
+                }
+            }
+        }
+    });
+
+    // Resize a window via the resize grip (asks the client to reconfigure).
+    desktop.on_resize_window({
+        let cmd_tx = cmd_tx.clone();
+        let model = model.clone();
+        let windows = windows.clone();
+        move |id, dw, dh| {
+            let windows = windows.borrow();
+            if let Some(&row) = windows.rows.get(&(id as u64)) {
+                if let Some(tile) = model.row_data(row) {
+                    let _ = cmd_tx.send(slick_wayland::Command::ResizeWindow {
+                        id: slick_wayland::WindowId(id as u64),
+                        width: (tile.width + dw).max(1.0) as i32,
+                        height: (tile.height + dh).max(1.0) as i32,
+                    });
+                }
+            }
+        }
+    });
+
+    // Pointer events over a client window.
+    desktop.on_pointer_window({
+        let cmd_tx = cmd_tx.clone();
+        move |id, x, y, kind, btn| {
+            let id = slick_wayland::WindowId(id as u64);
+            let cmd = match kind {
+                1 | 2 => slick_wayland::Command::PointerButton {
+                    id,
+                    button: evdev_button(btn),
+                    pressed: kind == 1,
+                },
+                _ => slick_wayland::Command::PointerMotion {
+                    id,
+                    x: x as f64,
+                    y: y as f64,
+                },
+            };
+            let _ = cmd_tx.send(cmd);
+        }
+    });
+
+    desktop.on_scroll_window({
+        let cmd_tx = cmd_tx.clone();
+        move |id, dx, dy| {
+            // Wayland axis is positive-down; Slint scroll delta is positive-up.
+            let _ = cmd_tx.send(slick_wayland::Command::PointerAxis {
+                id: slick_wayland::WindowId(id as u64),
+                dx: -dx as f64,
+                dy: -dy as f64,
+            });
+        }
+    });
+
+    // Keyboard: forward each press as a (modifier-wrapped) key tap.
+    desktop.on_key_window({
+        let cmd_tx = cmd_tx.clone();
+        move |_id, text, pressed, ctrl, alt, shift| {
+            if pressed {
+                forward_key(&cmd_tx, text.as_str(), ctrl, alt, shift);
+            }
+        }
+    });
+
     // Clock: refresh once a second.
     let update_clock = {
         let weak = desktop.as_weak();
@@ -199,6 +292,7 @@ fn handle_event(
                     texture: slint::Image::default(),
                     title: title.into(),
                     decorated,
+                    focused: false,
                     x: offset,
                     y: offset,
                     width: width as f32,
@@ -245,6 +339,177 @@ fn handle_event(
             false
         }
     }
+}
+
+/// Raise a window to the top of the stack and mark it focused. Rebuilds the
+/// id->row map from the resulting model order.
+fn raise_and_focus(model: &Rc<VecModel<WindowTile>>, windows: &Rc<RefCell<Windows>>, id: u64) {
+    let mut w = windows.borrow_mut();
+    w.focused = Some(id);
+    if let Some(&row) = w.rows.get(&id) {
+        if row + 1 != model.row_count() {
+            if let Some(tile) = model.row_data(row) {
+                model.remove(row);
+                model.push(tile);
+            }
+        }
+    }
+    for i in 0..model.row_count() {
+        if let Some(mut tile) = model.row_data(i) {
+            w.rows.insert(tile.id as u64, i);
+            let want = tile.id as u64 == id;
+            if tile.focused != want {
+                tile.focused = want;
+                model.set_row_data(i, tile);
+            }
+        }
+    }
+}
+
+/// Map a Slint pointer-button index (1=left, 2=right, 3=middle) to an evdev code.
+fn evdev_button(btn: i32) -> u32 {
+    match btn {
+        2 => 0x111, // BTN_RIGHT
+        3 => 0x112, // BTN_MIDDLE
+        _ => 0x110, // BTN_LEFT
+    }
+}
+
+/// Forward one key press as a modifier-wrapped tap to the focused window.
+fn forward_key(
+    cmd_tx: &slick_wayland::CommandSender<slick_wayland::Command>,
+    text: &str,
+    ctrl: bool,
+    alt: bool,
+    shift_mod: bool,
+) {
+    let Some((keycode, needs_shift)) = evdev_keycode(text) else {
+        return;
+    };
+    let mut mods = Vec::new();
+    if ctrl {
+        mods.push(29); // KEY_LEFTCTRL
+    }
+    if alt {
+        mods.push(56); // KEY_LEFTALT
+    }
+    if needs_shift || shift_mod {
+        mods.push(42); // KEY_LEFTSHIFT
+    }
+    let key = |keycode: u32, pressed: bool| {
+        let _ = cmd_tx.send(slick_wayland::Command::Key { keycode, pressed });
+    };
+    for m in &mods {
+        key(*m, true);
+    }
+    key(keycode, true);
+    key(keycode, false);
+    for m in mods.iter().rev() {
+        key(*m, false);
+    }
+}
+
+/// Best-effort mapping of Slint key text to a US-layout evdev keycode plus
+/// whether Shift is needed. Returns `None` for unmapped keys.
+fn evdev_keycode(text: &str) -> Option<(u32, bool)> {
+    let mut chars = text.chars();
+    let c = chars.next()?;
+    // Named keys (Slint encodes these as specific control/private-use chars).
+    match c {
+        '\u{000a}' | '\r' => return Some((28, false)), // Return
+        '\u{0008}' => return Some((14, false)),        // Backspace
+        '\u{0009}' => return Some((15, false)),        // Tab
+        '\u{001b}' => return Some((1, false)),         // Escape
+        '\u{007f}' => return Some((111, false)),       // Delete
+        '\u{f700}' => return Some((103, false)),       // Up
+        '\u{f701}' => return Some((108, false)),       // Down
+        '\u{f702}' => return Some((105, false)),       // Left
+        '\u{f703}' => return Some((106, false)),       // Right
+        ' ' => return Some((57, false)),               // Space
+        _ => {}
+    }
+    // Beyond here we only handle single printable characters.
+    if chars.next().is_some() {
+        return None;
+    }
+    if c.is_ascii_alphabetic() {
+        let code = match c.to_ascii_lowercase() {
+            'a' => 30,
+            'b' => 48,
+            'c' => 46,
+            'd' => 32,
+            'e' => 18,
+            'f' => 33,
+            'g' => 34,
+            'h' => 35,
+            'i' => 23,
+            'j' => 36,
+            'k' => 37,
+            'l' => 38,
+            'm' => 50,
+            'n' => 49,
+            'o' => 24,
+            'p' => 25,
+            'q' => 16,
+            'r' => 19,
+            's' => 31,
+            't' => 20,
+            'u' => 22,
+            'v' => 47,
+            'w' => 17,
+            'x' => 45,
+            'y' => 21,
+            'z' => 44,
+            _ => return None,
+        };
+        return Some((code, c.is_ascii_uppercase()));
+    }
+    let mapped = match c {
+        '1' => (2, false),
+        '2' => (3, false),
+        '3' => (4, false),
+        '4' => (5, false),
+        '5' => (6, false),
+        '6' => (7, false),
+        '7' => (8, false),
+        '8' => (9, false),
+        '9' => (10, false),
+        '0' => (11, false),
+        '!' => (2, true),
+        '@' => (3, true),
+        '#' => (4, true),
+        '$' => (5, true),
+        '%' => (6, true),
+        '^' => (7, true),
+        '&' => (8, true),
+        '*' => (9, true),
+        '(' => (10, true),
+        ')' => (11, true),
+        '-' => (12, false),
+        '_' => (12, true),
+        '=' => (13, false),
+        '+' => (13, true),
+        '[' => (26, false),
+        '{' => (26, true),
+        ']' => (27, false),
+        '}' => (27, true),
+        '\\' => (43, false),
+        '|' => (43, true),
+        ';' => (39, false),
+        ':' => (39, true),
+        '\'' => (40, false),
+        '"' => (40, true),
+        '`' => (41, false),
+        '~' => (41, true),
+        ',' => (51, false),
+        '<' => (51, true),
+        '.' => (52, false),
+        '>' => (52, true),
+        '/' => (53, false),
+        '?' => (53, true),
+        _ => return None,
+    };
+    Some(mapped)
 }
 
 /// Spawn a shell command detached, pointed at slick's compositor. `wayland` is

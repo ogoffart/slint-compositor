@@ -77,15 +77,12 @@ impl SlickState {
         self.start_time.elapsed().as_millis() as u32
     }
 
-    /// Apply a command from the UI thread.
-    pub fn handle_command(&mut self, command: crate::Command) {
-        match command {
-            crate::Command::CloseWindow(id) => {
-                if let Some(entry) = self.windows.values().find(|e| e.id == id) {
-                    entry.toplevel.send_close();
-                }
-            }
-        }
+    /// The `wl_surface` of the window with the given id, if mapped.
+    pub fn surface_for(&self, id: WindowId) -> Option<WlSurface> {
+        self.windows
+            .values()
+            .find(|e| e.id == id)
+            .map(|e| e.toplevel.wl_surface().clone())
     }
 }
 
