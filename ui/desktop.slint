@@ -1,9 +1,14 @@
 import { Panel } from "panel.slint";
+import { Launcher } from "launcher.slint";
 
 // Root scene. In later milestones the area left of the panel becomes the
 // composited client-window layer (Slint `Image`s backed by GL textures).
 export component Desktop inherits Window {
     in property <string> clock-time;
+    in-out property <bool> launcher-visible: false;
+
+    // Emitted when the user submits a command in the launcher.
+    callback launch(string);
 
     preferred-width: 1280px;
     preferred-height: 800px;
@@ -15,5 +20,22 @@ export component Desktop inherits Window {
         x: parent.width - self.width;
         y: 0;
         height: parent.height;
+        toggle-launcher => {
+            root.launcher-visible = !root.launcher-visible;
+        }
+    }
+
+    if root.launcher-visible: Launcher {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        launch(cmd) => {
+            root.launch(cmd);
+            root.launcher-visible = false;
+        }
+        dismiss => {
+            root.launcher-visible = false;
+        }
     }
 }

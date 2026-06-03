@@ -1,9 +1,10 @@
 import { Clock } from "clock.slint";
 
-// The right-edge panel: clock on top, taskbar in the middle (M4),
-// system tray at the bottom (M6).
+// The right-edge panel: a launcher button and clock on top, taskbar in the
+// middle (M4), system tray at the bottom (M6).
 export component Panel inherits Rectangle {
     in property <string> clock-time;
+    callback toggle-launcher();
 
     width: 56px;
     background: #11111b;
@@ -11,6 +12,27 @@ export component Panel inherits Rectangle {
     VerticalLayout {
         padding: 8px;
         spacing: 12px;
+
+        // Launcher button: opens the run dialog.
+        Rectangle {
+            height: 40px;
+            border-radius: 8px;
+            background: launch-area.has-hover ? #313244 : #181825;
+
+            Text {
+                text: "▶";
+                color: #89b4fa;
+                font-size: 18px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            launch-area := TouchArea {
+                clicked => {
+                    root.toggle-launcher();
+                }
+            }
+        }
 
         Clock {
             time: root.clock-time;

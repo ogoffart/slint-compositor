@@ -1,0 +1,54 @@
+import { LineEdit } from "std-widgets.slint";
+
+// A simple run dialog: type a command and press Enter to launch it.
+// Shown as a full-screen dimming overlay; click outside the box to dismiss.
+export component Launcher inherits Rectangle {
+    callback launch(string);
+    callback dismiss();
+
+    background: #00000099;
+
+    // Click on the dimmed backdrop dismisses the launcher.
+    TouchArea {
+        clicked => {
+            root.dismiss();
+        }
+    }
+
+    Rectangle {
+        width: min(480px, parent.width - 80px);
+        height: 56px;
+        background: #1e1e2e;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: #45475a;
+
+        // Swallow clicks on the box so they don't reach the backdrop.
+        TouchArea {}
+
+        input := LineEdit {
+            width: parent.width - 24px;
+            font-size: 16px;
+            placeholder-text: "Run a command…";
+            accepted(text) => {
+                root.launch(text);
+            }
+        }
+
+        // Auto-focus the field each time the launcher appears.
+        init => {
+            input.focus();
+        }
+    }
+
+    // Escape closes the launcher.
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.dismiss();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

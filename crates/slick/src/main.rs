@@ -4,6 +4,8 @@
 //! Wayland protocol engine runs on its own thread and reports state changes back
 //! over a channel which we drain on the UI thread.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
@@ -27,6 +29,16 @@ fn main() -> anyhow::Result<()> {
 
     let desktop = Desktop::new()?;
 
+    // The WAYLAND_DISPLAY our compositor created, learned from Event::Ready.
+    // Shared between the event pump and the launch callback (both on this thread).
+    let socket_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+
+    // Launcher: run an arbitrary command, pointed at our compositor socket.
+    desktop.on_launch({
+        let socket_name = socket_name.clone();
+        move |cmd| spawn_command(cmd.as_str(), socket_name.borrow().as_deref())
+    });
+
     // Clock: refresh once a second.
     let update_clock = {
         let weak = desktop.as_weak();
@@ -44,18 +56,43 @@ fn main() -> anyhow::Result<()> {
         update_clock,
     );
 
-    // Drain compositor events on the UI thread (M0: just log them).
+    // Drain compositor events on the UI thread.
     let event_timer = slint::Timer::default();
-    event_timer.start(
-        slint::TimerMode::Repeated,
-        Duration::from_millis(200),
+    event_timer.start(slint::TimerMode::Repeated, Duration::from_millis(200), {
+        let socket_name = socket_name.clone();
         move || {
             while let Ok(event) = rx.try_recv() {
-                log::info!("compositor event: {event:?}");
+                match event {
+                    slick_wayland::Event::Ready { socket_name: name } => {
+                        log::info!("compositor ready on WAYLAND_DISPLAY={name}");
+                        *socket_name.borrow_mut() = Some(name);
+                    }
+                    other => log::info!("compositor event: {other:?}"),
+                }
             }
-        },
-    );
+        }
+    });
 
     desktop.run()?;
     Ok(())
+}
+
+/// Spawn a shell command detached, with `WAYLAND_DISPLAY` pointed at our
+/// compositor so launched apps connect to us.
+fn spawn_command(cmd: &str, wayland_display: Option<&str>) {
+    let cmd = cmd.trim();
+    if cmd.is_empty() {
+        return;
+    }
+
+    let mut command = std::process::Command::new("/bin/sh");
+    command.arg("-c").arg(cmd);
+    if let Some(display) = wayland_display {
+        command.env("WAYLAND_DISPLAY", display);
+    }
+
+    match command.spawn() {
+        Ok(child) => log::info!("launched `{cmd}` (pid {})", child.id()),
+        Err(err) => log::error!("failed to launch `{cmd}`: {err}"),
+    }
 }
