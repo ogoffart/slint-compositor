@@ -60,3 +60,73 @@ fn main() -> Result<(), slint::PlatformError> {
 
     window.run()
 }
+
+#[cfg(test)]
+mod screenshot {
+    //! Render the browser headlessly with Slint's software renderer and write a
+    //! PNG, so the dialog's appearance can be reviewed without a display server.
+    //!
+    //! (Slint's *testing* backend cannot do this in 1.16: its renderer only does
+    //! layout, font metrics and element queries — `Window::take_snapshot()`
+    //! returns "not implemented by the platform". The software renderer is the
+    //! supported headless rasteriser.)
+    use super::*;
+    use slint::platform::software_renderer::{
+        MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType,
+    };
+    use slint::platform::{Platform, WindowAdapter};
+
+    struct SwPlatform {
+        window: Rc<MinimalSoftwareWindow>,
+    }
+
+    impl Platform for SwPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(self.window.clone())
+        }
+    }
+
+    #[test]
+    fn render_to_png() {
+        let (w, h) = (920u32, 600u32);
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        // `set_platform` must run before any component is created. This is the
+        // only window-creating test in the crate, so the global install is safe.
+        slint::platform::set_platform(Box::new(SwPlatform {
+            window: window.clone(),
+        }))
+        .expect("install software platform");
+        window.set_size(slint::PhysicalSize::new(w, h));
+
+        let dir = std::env::var("SFILES_SHOT_DIR").unwrap_or_else(|_| "/tmp/sfiles-sample".into());
+        let out =
+            std::env::var("SFILES_SHOT_OUT").unwrap_or_else(|_| "/tmp/sfiles-testing.png".into());
+
+        let files = Files::new().unwrap();
+        let items = Rc::new(VecModel::<FileItem>::default());
+        files.set_items(items.clone().into());
+        let browser = Rc::new(RefCell::new(Browser::new(files.as_weak(), items)));
+        browser.borrow_mut().navigate(PathBuf::from(&dir));
+        files.show().unwrap();
+        files.window().request_redraw();
+
+        let mut buffer = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
+        let drawn = window.draw_if_needed(|renderer| {
+            renderer.render(&mut buffer, w as usize);
+        });
+        assert!(drawn, "software renderer reported nothing to draw");
+
+        // Un-premultiply into straight RGBA8 for PNG encoding.
+        let mut rgba = Vec::with_capacity(buffer.len() * 4);
+        for p in &buffer {
+            let a = p.alpha;
+            let unp = |c: u8| if a == 0 || a == 255 { c } else { ((c as u16 * 255) / a as u16) as u8 };
+            rgba.extend_from_slice(&[unp(p.red), unp(p.green), unp(p.blue), a]);
+        }
+        image::save_buffer(&out, &rgba, w, h, image::ExtendedColorType::Rgba8)
+            .expect("encode png");
+        eprintln!("wrote {out} ({w}x{h})");
+
+        files.hide().unwrap();
+    }
+}
