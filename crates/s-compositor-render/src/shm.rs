@@ -77,3 +77,23 @@ mod tests {
         assert_eq!(out, vec![3, 2, 1, 4, 7, 6, 5, 8]);
     }
 }
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+
+    #[test]
+    fn zero_dimensions_yield_empty() {
+        assert!(convert_to_rgba(&[], 0, 0, 0, ShmFormat::Argb8888).is_empty());
+    }
+
+    #[test]
+    fn short_source_stops_early_without_panic() {
+        // Claim 2 rows but only provide 1 row of data.
+        let src = [10u8, 20, 30, 40];
+        let out = convert_to_rgba(&src, 1, 2, 4, ShmFormat::Argb8888);
+        assert_eq!(out.len(), 1 * 2 * 4);
+        assert_eq!(&out[0..4], &[30, 20, 10, 40]); // row 0 converted
+        assert_eq!(&out[4..8], &[0, 0, 0, 0]); // row 1 left zeroed
+    }
+}

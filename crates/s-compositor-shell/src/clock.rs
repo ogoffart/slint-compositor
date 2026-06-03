@@ -19,3 +19,21 @@ mod tests {
         assert_eq!(format_clock(t), "09\n05");
     }
 }
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn formats_afternoon_24h() {
+        let t = Local.with_ymd_and_hms(2026, 6, 3, 15, 36, 0).unwrap();
+        assert_eq!(format_clock(t), "15\n36");
+    }
+
+    #[test]
+    fn formats_midnight() {
+        let t = Local.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap();
+        assert_eq!(format_clock(t), "00\n00");
+    }
+}

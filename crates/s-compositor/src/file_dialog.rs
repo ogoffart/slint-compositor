@@ -170,3 +170,24 @@ pub fn home_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_image;
+    use std::path::Path;
+
+    #[test]
+    fn recognizes_image_extensions() {
+        assert!(is_image(Path::new("a.png")));
+        assert!(is_image(Path::new("a.JPG"))); // case-insensitive
+        assert!(is_image(Path::new("/x/y.jpeg")));
+        assert!(is_image(Path::new("a.webp")));
+    }
+
+    #[test]
+    fn rejects_non_images() {
+        assert!(!is_image(Path::new("a.txt")));
+        assert!(!is_image(Path::new("noext")));
+        assert!(!is_image(Path::new("a.tar.gz")));
+    }
+}
