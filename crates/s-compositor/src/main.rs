@@ -767,6 +767,27 @@ fn main() -> anyhow::Result<()> {
     let switcher_until: Rc<RefCell<Option<std::time::Instant>>> = Rc::new(RefCell::new(None));
     let switcher_model = Rc::new(VecModel::<WindowTile>::default());
     desktop.set_switcher_windows(ModelRc::from(switcher_model.clone()));
+
+    // Scroll over the panel sound button to change volume (and flash the OSD).
+    desktop.on_volume_scroll({
+        let weak = desktop.as_weak();
+        let tx = vol_cmd_tx.clone();
+        let osd_until = osd_until.clone();
+        move |dy| {
+            let Some(d) = weak.upgrade() else {
+                return;
+            };
+            let Some(tx) = &tx else {
+                return;
+            };
+            // Slint wheel delta-y is positive scrolling down; up = louder.
+            let step = if dy < 0.0 { 5.0 } else { -5.0 };
+            let target = (d.get_volume() + step).clamp(0.0, 100.0);
+            let _ = tx.send(volume::VolCommand::Set(target));
+            d.set_osd_visible(true);
+            *osd_until.borrow_mut() = Some(std::time::Instant::now() + Duration::from_millis(1200));
+        }
+    });
     let run_binding: Rc<dyn Fn(&str, bool, bool, bool, bool) -> bool> = {
         let keybinds = keybinds.clone();
         let weak = desktop.as_weak();
@@ -1017,10 +1038,19 @@ fn main() -> anyhow::Result<()> {
                          (XDG_RUNTIME_DIR={runtime_dir}, {} output(s))",
                         outputs.len()
                     );
-                    *wayland_env.borrow_mut() =
-                        Some((socket_name.clone(), runtime_dir.clone()));
-                    let bw = outputs.iter().map(|o| o.x + o.w).max().unwrap_or(1280).max(1);
-                    let bh = outputs.iter().map(|o| o.y + o.h).max().unwrap_or(800).max(1);
+                    *wayland_env.borrow_mut() = Some((socket_name.clone(), runtime_dir.clone()));
+                    let bw = outputs
+                        .iter()
+                        .map(|o| o.x + o.w)
+                        .max()
+                        .unwrap_or(1280)
+                        .max(1);
+                    let bh = outputs
+                        .iter()
+                        .map(|o| o.y + o.h)
+                        .max()
+                        .unwrap_or(800)
+                        .max(1);
                     outputs_model.set_vec(
                         outputs
                             .iter()
@@ -1991,7 +2021,12 @@ fn work_area(d: &Desktop, cx: f32, cy: f32) -> (f32, f32, f32, f32) {
         .unwrap_or_else(|| {
             let scale = d.window().scale_factor().max(0.01);
             let size = d.window().size();
-            (0.0, 0.0, size.width as f32 / scale, size.height as f32 / scale)
+            (
+                0.0,
+                0.0,
+                size.width as f32 / scale,
+                size.height as f32 / scale,
+            )
         });
     let panel = d.get_panel_size();
     match d.get_panel_edge() {
@@ -2269,7 +2304,11 @@ mod shot {
             return;
         }
         let multi = std::env::var("SCOMP_SHOT_MULTI").is_ok();
-        let (w, h) = if multi { (2560u32, 800u32) } else { (1280u32, 800u32) };
+        let (w, h) = if multi {
+            (2560u32, 800u32)
+        } else {
+            (1280u32, 800u32)
+        };
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
         slint::platform::set_platform(Box::new(SwPlatform {
             window: window.clone(),

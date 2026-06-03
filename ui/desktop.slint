@@ -340,6 +340,7 @@ export component Desktop inherits Window {
     in property <bool> wifi-enabled;
     in property <[WifiNetwork]> wifi-networks;
     callback set-volume(float);
+    callback volume-scroll(float);
     callback toggle-mute();
     callback wifi-toggle();
     callback wifi-scan();
@@ -638,6 +639,9 @@ export component Desktop inherits Window {
         }
         toggle-notification-center => {
             root.notification-center-visible = !root.notification-center-visible;
+        }
+        volume-scroll(dy) => {
+            root.volume-scroll(dy);
         }
         toggle-calendar => {
             root.calendar-visible = !root.calendar-visible;

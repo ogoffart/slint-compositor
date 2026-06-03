@@ -56,6 +56,7 @@ component PanelButton inherits Rectangle {
     in property <string> tooltip;
     in property <int> edge;   // 0=Right 1=Left 2=Top 3=Bottom
     callback clicked();
+    callback scrolled(float);   // wheel delta-y over the button
     border-radius: 8px;
     background: ta.has-hover ? Theme.surface : Theme.panel;
     Text {
@@ -68,6 +69,10 @@ component PanelButton inherits Rectangle {
     ta := TouchArea {
         clicked => {
             root.clicked();
+        }
+        scroll-event(e) => {
+            root.scrolled(e.delta-y / 1px);
+            accept
         }
     }
 
@@ -189,6 +194,7 @@ export component Panel inherits Rectangle {
     callback activate(int);
     callback switch-workspace(int);
     callback tray-activate(string);
+    callback volume-scroll(float);
 
     background: Theme.panel;
 
@@ -226,6 +232,7 @@ export component Panel inherits Rectangle {
             tooltip: "Sound & network";
             edge: root.edge;
             clicked => { root.toggle-quick-settings(); }
+            scrolled(dy) => { root.volume-scroll(dy); }
         }
         PanelButton {
             icon: root.dnd ? "🔕" : "🔔";
@@ -299,6 +306,7 @@ export component Panel inherits Rectangle {
             tooltip: "Sound & network";
             edge: root.edge;
             clicked => { root.toggle-quick-settings(); }
+            scrolled(dy) => { root.volume-scroll(dy); }
         }
         PanelButton {
             icon: root.dnd ? "🔕" : "🔔";
