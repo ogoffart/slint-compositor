@@ -1,0 +1,252 @@
+import { Theme } from "theme.slint";
+import { FileItem } from "types.slint";
+import { FileIcon } from "file_icon.slint";
+import { Button, ScrollView, LineEdit } from "std-widgets.slint";
+
+// Standalone file-browser window. Runs as its own Wayland client (its own
+// binary), but shares the look of the in-shell file dialog: the same type
+// icons, image preview and keyboard model. All logic — listing, navigation,
+// launching — lives in Rust; this is purely the view.
+export component Files inherits Window {
+    in property <string> window-title: "Files";
+    title: root.window-title;
+    preferred-width: 920px;
+    preferred-height: 600px;
+    min-width: 480px;
+    min-height: 320px;
+    background: Theme.bg;
+
+    in property <string> path;
+    in property <[FileItem]> items;
+    in-out property <int> selected: -1;
+    // Preview of the selected image (empty for non-images), plus its name and a
+    // short, human-readable description of the selection (size / kind).
+    in property <image> preview;
+    in property <string> selected-name;
+    in property <string> selected-info;
+    in property <bool> can-back;
+
+    callback go-back();
+    callback go-up();
+    callback go-home();
+    callback navigate-to(string);     // a path typed into the editable bar
+    callback entry-clicked(int);      // single click: select + preview
+    callback activate(int);           // double-click / Enter: open dir or launch
+    callback move-selection(int);     // keyboard arrow delta (+1/-1, big = home/end)
+    callback activate-selected();     // Enter on the current selection
+
+    property <length> row-h: 30px;
+
+    init => {
+        keys.focus();
+    }
+
+    // Keep the selected row scrolled into view without breaking wheel scrolling.
+    changed selected => {
+        if (root.selected >= 0) {
+            if (root.selected * root.row-h < -list.viewport-y) {
+                list.viewport-y = -(root.selected * root.row-h);
+            } else if ((root.selected + 1) * root.row-h > -list.viewport-y + list.visible-height) {
+                list.viewport-y = -((root.selected + 1) * root.row-h - list.visible-height);
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 10px;
+
+        // Toolbar: navigation buttons + editable path.
+        HorizontalLayout {
+            spacing: 6px;
+            Button {
+                text: "←";
+                enabled: root.can-back;
+                clicked => { root.go-back(); keys.focus(); }
+            }
+            Button {
+                text: "⬆";
+                clicked => { root.go-up(); keys.focus(); }
+            }
+            Button {
+                text: "⌂";
+                clicked => { root.go-home(); keys.focus(); }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.surface;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Theme.hover;
+                HorizontalLayout {
+                    padding: 2px;
+                    path-edit := LineEdit {
+                        text: root.path;
+                        placeholder-text: "Type a path…";
+                        accepted(text) => {
+                            root.navigate-to(text);
+                            keys.focus();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Body: file list on the left, preview on the right.
+        keys := FocusScope {
+            key-pressed(e) => {
+                if (e.text == Key.UpArrow) {
+                    root.move-selection(-1);
+                    return EventResult.accept;
+                }
+                if (e.text == Key.DownArrow) {
+                    root.move-selection(1);
+                    return EventResult.accept;
+                }
+                if (e.text == Key.PageUp) {
+                    root.move-selection(-12);
+                    return EventResult.accept;
+                }
+                if (e.text == Key.PageDown) {
+                    root.move-selection(12);
+                    return EventResult.accept;
+                }
+                if (e.text == Key.Home) {
+                    root.move-selection(-100000);
+                    return EventResult.accept;
+                }
+                if (e.text == Key.End) {
+                    root.move-selection(100000);
+                    return EventResult.accept;
+                }
+                if (e.text == Key.Return || e.text == Key.RightArrow) {
+                    root.activate-selected();
+                    return EventResult.accept;
+                }
+                if (e.text == Key.LeftArrow) {
+                    root.go-up();
+                    return EventResult.accept;
+                }
+                if (e.text == Key.Backspace) {
+                    root.go-back();
+                    return EventResult.accept;
+                }
+                return EventResult.reject;
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+
+                // File list.
+                Rectangle {
+                    horizontal-stretch: 3;
+                    background: Theme.surface;
+                    border-radius: 8px;
+                    clip: true;
+                    list := ScrollView {
+                        VerticalLayout {
+                            alignment: start;
+                            for item[idx] in root.items: Rectangle {
+                                height: root.row-h;
+                                background: idx == root.selected ? Theme.accent
+                                    : (entry-area.has-hover ? Theme.hover : transparent);
+                                border-radius: 6px;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 8px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        FileIcon {
+                                            kind: item.kind;
+                                            is-dir: item.is-dir;
+                                        }
+                                    }
+                                    Text {
+                                        text: item.name;
+                                        color: idx == root.selected ? #ffffff
+                                            : (item.is-dir ? Theme.fg : Theme.fg.darker(0.1));
+                                        font-size: 13px;
+                                        font-weight: item.is-dir ? 600 : 400;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+                                    if item.is-dir: Text {
+                                        text: "›";
+                                        color: idx == root.selected ? #ffffff : Theme.hover;
+                                        font-size: 16px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                entry-area := TouchArea {
+                                    clicked => {
+                                        root.entry-clicked(idx);
+                                    }
+                                    double-clicked => {
+                                        root.entry-clicked(idx);
+                                        root.activate(idx);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Preview pane.
+                Rectangle {
+                    horizontal-stretch: 2;
+                    background: Theme.surface;
+                    border-radius: 8px;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 10px;
+
+                        Rectangle {
+                            vertical-stretch: 1;
+                            if root.preview.width > 0: Image {
+                                source: root.preview;
+                                image-fit: contain;
+                                width: parent.width;
+                                height: parent.height;
+                            }
+                            if root.preview.width == 0: VerticalLayout {
+                                alignment: center;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text {
+                                        text: root.selected-name == "" ? "No selection"
+                                            : "No preview";
+                                        color: Theme.hover;
+                                        font-size: 14px;
+                                    }
+                                }
+                            }
+                        }
+                        Text {
+                            text: root.selected-name;
+                            color: Theme.fg;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.selected-info;
+                            color: Theme.subtext;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Status bar.
+        Text {
+            text: root.items.length == 1 ? "1 item" : root.items.length + " items";
+            color: Theme.subtext;
+            font-size: 11px;
+        }
+    }
+}

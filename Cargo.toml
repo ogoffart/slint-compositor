@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/s-compositor",
+    "crates/s-files",
     "crates/s-compositor-wayland",
     "crates/s-compositor-render",
     "crates/s-compositor-shell",
