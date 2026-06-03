@@ -21,6 +21,9 @@ use gl_bridge::{Frame, GlBridge};
 
 slint::include_modules!();
 
+/// Number of virtual desktops.
+const WORKSPACES: u32 = 4;
+
 /// Shared UI-thread state touched by both the event pump and the rendering
 /// notifier.
 #[derive(Default)]
@@ -292,8 +295,16 @@ fn main() -> anyhow::Result<()> {
         let cmd_tx = cmd_tx.clone();
         let model = model.clone();
         let windows = windows.clone();
+        let weak = desktop.as_weak();
         move |id| {
             raise_and_focus(&model, &windows, id as u64);
+            // Follow the window to its workspace if it is on another one.
+            if let (Some(d), Some(&row)) = (weak.upgrade(), windows.borrow().rows.get(&(id as u64)))
+            {
+                if let Some(tile) = model.row_data(row) {
+                    d.set_active_workspace(tile.workspace);
+                }
+            }
             // Clicking a window dismisses any open menus.
             let _ = cmd_tx.send(s_compositor_wayland::Command::DismissPopups);
             let _ = cmd_tx.send(s_compositor_wayland::Command::FocusWindow(
@@ -381,10 +392,29 @@ fn main() -> anyhow::Result<()> {
     // Keyboard: forward each press as a (modifier-wrapped) key tap.
     desktop.on_key_window({
         let cmd_tx = cmd_tx.clone();
-        move |_id, text, pressed, ctrl, alt, shift| {
-            if pressed {
-                forward_key(&cmd_tx, text.as_str(), ctrl, alt, shift);
+        let model = model.clone();
+        let windows = windows.clone();
+        let weak = desktop.as_weak();
+        move |_id, text, pressed, ctrl, alt, shift, meta| {
+            if !pressed {
+                return;
             }
+            // Super+1..4 switches workspace; Super+Shift+1..4 moves the focused
+            // window there. These are handled by the shell, not forwarded.
+            if meta {
+                if let Some(n) = text.chars().next().and_then(|c| c.to_digit(10)) {
+                    if (1..=WORKSPACES).contains(&n) {
+                        let ws = (n - 1) as i32;
+                        if shift {
+                            move_focused_to_workspace(&model, &windows, ws);
+                        } else if let Some(d) = weak.upgrade() {
+                            d.set_active_workspace(ws);
+                        }
+                        return;
+                    }
+                }
+            }
+            forward_key(&cmd_tx, text.as_str(), ctrl, alt, shift);
         }
     });
 
@@ -418,8 +448,19 @@ fn main() -> anyhow::Result<()> {
         let file_dialog = file_dialog.clone();
         move || {
             let mut dirty = false;
+            let active_ws = weak
+                .upgrade()
+                .map(|d| d.get_active_workspace())
+                .unwrap_or(0);
             while let Ok(event) = rx.try_recv() {
-                dirty |= handle_event(event, &model, &popups_model, &windows, &wayland_env);
+                dirty |= handle_event(
+                    event,
+                    &model,
+                    &popups_model,
+                    &windows,
+                    &wayland_env,
+                    active_ws,
+                );
             }
             // Serve pending portal file-open requests with the same dialog.
             while let Ok(request) = portal_rx.try_recv() {
@@ -452,6 +493,7 @@ fn handle_event(
     popups_model: &Rc<VecModel<PopupTile>>,
     windows: &Rc<RefCell<Windows>>,
     wayland_env: &Rc<RefCell<Option<(String, String)>>>,
+    active_workspace: i32,
 ) -> bool {
     use s_compositor_wayland::Event;
     match event {
@@ -491,6 +533,7 @@ fn handle_event(
                     focused: false,
                     minimized: false,
                     maximized: false,
+                    workspace: active_workspace,
                     x: offset,
                     y: offset,
                     width: width as f32,
@@ -622,6 +665,24 @@ fn popup_origin(
 
 /// Raise a window to the top of the stack and mark it focused. Rebuilds the
 /// id->row map from the resulting model order.
+/// Move the focused window to a workspace (it disappears from the current one).
+fn move_focused_to_workspace(
+    model: &Rc<VecModel<WindowTile>>,
+    windows: &Rc<RefCell<Windows>>,
+    workspace: i32,
+) {
+    let row = {
+        let w = windows.borrow();
+        w.focused.and_then(|id| w.rows.get(&id).copied())
+    };
+    if let Some(row) = row {
+        if let Some(mut tile) = model.row_data(row) {
+            tile.workspace = workspace;
+            model.set_row_data(row, tile);
+        }
+    }
+}
+
 fn raise_and_focus(model: &Rc<VecModel<WindowTile>>, windows: &Rc<RefCell<Windows>>, id: u64) {
     let mut w = windows.borrow_mut();
     w.focused = Some(id);
