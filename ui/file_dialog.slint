@@ -2,28 +2,123 @@ import { Theme } from "theme.slint";
 import { Button, ScrollView, LineEdit } from "std-widgets.slint";
 import { FileItem } from "types.slint";
 
+// A small type-coloured icon: a folder for directories, otherwise a document
+// glyph tinted by file kind. Drawn (rather than emoji) so it renders crisply
+// regardless of the available fonts.
+component FileIcon inherits Rectangle {
+    in property <string> kind;
+    in property <bool> is-dir;
+    width: 22px;
+    height: 22px;
+
+    // Per-kind accent colour.
+    property <color> tint:
+        is-dir ? #e6b34d :
+        kind == "image" ? #5cc46a :
+        kind == "audio" ? #b07cd8 :
+        kind == "video" ? #e0685f :
+        kind == "archive" ? #c9925a :
+        kind == "code" ? #5a9be0 :
+        kind == "pdf" ? #e0685f :
+        kind == "exec" ? #4bb6a8 :
+        #9aa3b0;
+
+    // Short label shown on document icons.
+    property <string> badge:
+        kind == "image" ? "▦" :
+        kind == "audio" ? "♪" :
+        kind == "video" ? "▶" :
+        kind == "archive" ? "▤" :
+        kind == "code" ? "<>" :
+        kind == "pdf" ? "P" :
+        kind == "exec" ? "$" :
+        "";
+
+    if is-dir: Rectangle {
+        // Folder: a body with a small tab on the top-left.
+        Rectangle {
+            y: 3px;
+            width: 9px;
+            height: 5px;
+            x: 2px;
+            background: root.tint.darker(0.15);
+            border-radius: 1px;
+        }
+        Rectangle {
+            y: 6px;
+            width: 18px;
+            height: 12px;
+            x: 2px;
+            background: root.tint;
+            border-radius: 2px;
+        }
+    }
+    if !is-dir: Rectangle {
+        // Document: a rounded page with a coloured spine and a kind badge.
+        width: 16px;
+        height: 19px;
+        background: Theme.surface.brighter(0.4);
+        border-radius: 2px;
+        border-width: 1px;
+        border-color: root.tint;
+        Rectangle {
+            x: 0;
+            width: 3px;
+            height: parent.height;
+            background: root.tint;
+            border-top-left-radius: 2px;
+            border-bottom-left-radius: 2px;
+        }
+        Text {
+            text: root.badge;
+            color: root.tint;
+            font-size: 9px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            x: 3px;
+            width: parent.width - 3px;
+        }
+    }
+}
+
 // A reusable file-open dialog. It is driven entirely from Rust (which fills
-// `path`/`items` and handles navigation), so the same dialog backs both the
-// in-shell settings flow and the XDG desktop portal.
+// `path`/`items`/`preview` and handles navigation), so the same dialog backs
+// both the in-shell settings flow and the XDG desktop portal.
 export component FileDialog inherits Rectangle {
     in property <string> title: "Open File";
     in property <string> path;
     in property <[FileItem]> items;
     in-out property <int> selected: -1;
+    // Preview of the selected image (empty for non-images), plus its name.
+    in property <image> preview;
+    in property <string> selected-name;
 
     callback entry-clicked(int);
     callback go-up();
     callback accept();
     callback cancel();
     callback navigate-to(string);     // a path typed into the editable bar
-    callback move-selection(int);     // keyboard arrow delta (+1/-1)
+    callback move-selection(int);     // keyboard arrow delta (+1/-1, big = home/end)
     callback activate-selected();     // Enter: open file or enter directory
 
-    background: Theme.overlay;
+    property <length> row-h: 30px;
+
+    background: #00000088;
 
     // Focus the keyboard handler as soon as the dialog appears.
     init => {
         keys.focus();
+    }
+
+    // Keep the selected row scrolled into view without breaking wheel scrolling.
+    changed selected => {
+        if (root.selected >= 0) {
+            if (root.selected * root.row-h < -list.viewport-y) {
+                list.viewport-y = -(root.selected * root.row-h);
+            } else if ((root.selected + 1) * root.row-h > -list.viewport-y + list.visible-height) {
+                list.viewport-y = -((root.selected + 1) * root.row-h - list.visible-height);
+            }
+        }
     }
 
     // Click outside the panel to cancel.
@@ -34,43 +129,58 @@ export component FileDialog inherits Rectangle {
     }
 
     Rectangle {
-        width: 640px;
-        height: 480px;
+        width: 760px;
+        height: 520px;
         background: Theme.bg;
-        border-radius: 10px;
+        border-radius: 12px;
         border-width: 1px;
         border-color: Theme.hover;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000099;
 
         TouchArea {} // swallow clicks on the panel
 
         VerticalLayout {
-            padding: 14px;
-            spacing: 10px;
+            padding: 16px;
+            spacing: 12px;
 
             Text {
                 text: root.title;
                 color: Theme.fg;
-                font-size: 16px;
+                font-size: 17px;
+                font-weight: 600;
             }
 
+            // Path bar: Up button + editable directory.
             HorizontalLayout {
                 spacing: 8px;
                 Button {
-                    text: "⬆ Up";
+                    text: "⬆";
                     clicked => {
                         root.go-up();
                     }
                 }
-                // Editable current-directory path: type a folder and press Enter.
-                LineEdit {
-                    text: root.path;
+                Rectangle {
                     horizontal-stretch: 1;
-                    accepted(text) => {
-                        root.navigate-to(text);
+                    background: Theme.surface;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.hover;
+                    HorizontalLayout {
+                        padding: 2px;
+                        path-edit := LineEdit {
+                            text: root.path;
+                            placeholder-text: "Type a path…";
+                            accepted(text) => {
+                                root.navigate-to(text);
+                                keys.focus();
+                            }
+                        }
                     }
                 }
             }
 
+            // Body: file list on the left, preview on the right.
             keys := FocusScope {
                 key-pressed(e) => {
                     if (e.text == Key.UpArrow) {
@@ -81,11 +191,27 @@ export component FileDialog inherits Rectangle {
                         root.move-selection(1);
                         return EventResult.accept;
                     }
-                    if (e.text == Key.Return) {
+                    if (e.text == Key.PageUp) {
+                        root.move-selection(-10);
+                        return EventResult.accept;
+                    }
+                    if (e.text == Key.PageDown) {
+                        root.move-selection(10);
+                        return EventResult.accept;
+                    }
+                    if (e.text == Key.Home) {
+                        root.move-selection(-100000);
+                        return EventResult.accept;
+                    }
+                    if (e.text == Key.End) {
+                        root.move-selection(100000);
+                        return EventResult.accept;
+                    }
+                    if (e.text == Key.Return || e.text == Key.RightArrow) {
                         root.activate-selected();
                         return EventResult.accept;
                     }
-                    if (e.text == Key.Backspace) {
+                    if (e.text == Key.LeftArrow || e.text == Key.Backspace) {
                         root.go-up();
                         return EventResult.accept;
                     }
@@ -96,28 +222,97 @@ export component FileDialog inherits Rectangle {
                     return EventResult.reject;
                 }
 
-                ScrollView {
-                    VerticalLayout {
-                        alignment: start;
-                        for item[idx] in root.items: Rectangle {
-                            height: 28px;
-                            background: idx == root.selected ? Theme.accent
-                                : (entry-area.has-hover ? Theme.surface : transparent);
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                Text {
-                                    text: item.is-dir ? item.name + "/" : item.name;
-                                    color: item.is-dir ? Theme.accent : Theme.fg;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                    horizontal-stretch: 1;
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    // File list.
+                    Rectangle {
+                        horizontal-stretch: 3;
+                        background: Theme.surface;
+                        border-radius: 8px;
+                        clip: true;
+                        list := ScrollView {
+                            VerticalLayout {
+                                alignment: start;
+                                for item[idx] in root.items: Rectangle {
+                                    height: root.row-h;
+                                    background: idx == root.selected ? Theme.accent
+                                        : (entry-area.has-hover ? Theme.hover : transparent);
+                                    border-radius: 6px;
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        spacing: 8px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            FileIcon {
+                                                kind: item.kind;
+                                                is-dir: item.is-dir;
+                                            }
+                                        }
+                                        Text {
+                                            text: item.name;
+                                            color: idx == root.selected ? #ffffff
+                                                : (item.is-dir ? Theme.fg : Theme.fg.darker(0.1));
+                                            font-size: 13px;
+                                            font-weight: item.is-dir ? 600 : 400;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
+                                        if item.is-dir: Text {
+                                            text: "›";
+                                            color: idx == root.selected ? #ffffff : Theme.hover;
+                                            font-size: 16px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    entry-area := TouchArea {
+                                        clicked => {
+                                            root.entry-clicked(idx);
+                                        }
+                                        double-clicked => {
+                                            root.entry-clicked(idx);
+                                            root.activate-selected();
+                                        }
+                                    }
                                 }
                             }
-                            entry-area := TouchArea {
-                                clicked => {
-                                    root.entry-clicked(idx);
+                        }
+                    }
+
+                    // Preview pane.
+                    Rectangle {
+                        horizontal-stretch: 2;
+                        background: Theme.surface;
+                        border-radius: 8px;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 10px;
+
+                            Rectangle {
+                                vertical-stretch: 1;
+                                if root.preview.width > 0: Image {
+                                    source: root.preview;
+                                    image-fit: contain;
+                                    width: parent.width;
+                                    height: parent.height;
                                 }
+                                if root.preview.width == 0: Text {
+                                    text: root.selected-name == "" ? "No selection"
+                                        : "No preview";
+                                    color: Theme.hover;
+                                    font-size: 14px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Text {
+                                text: root.selected-name;
+                                color: Theme.fg;
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                                overflow: elide;
                             }
                         }
                     }
@@ -135,6 +330,7 @@ export component FileDialog inherits Rectangle {
                 }
                 Button {
                     text: "Open";
+                    primary: true;
                     enabled: root.selected >= 0;
                     clicked => {
                         root.accept();

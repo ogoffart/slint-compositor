@@ -20,10 +20,13 @@ export struct LayerTile {
     height: length,
 }
 
-// An entry in the file dialog's current directory.
+// An entry in the file dialog's current directory. `kind` is a coarse type used
+// to pick an icon: "dir", "image", "audio", "video", "archive", "code", "text",
+// "pdf", "exec" or "file".
 export struct FileItem {
     name: string,
     is-dir: bool,
+    kind: string,
 }
 
 // A start-menu application entry. `kind`: "app" launches `command`, "run" opens
