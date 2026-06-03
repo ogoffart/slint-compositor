@@ -90,7 +90,14 @@ pub fn discover_shortcuts() -> Vec<AppEntry> {
         &mut apps,
         "🖥",
         "Terminal",
-        &["alacritty", "foot", "kitty", "wezterm", "gnome-terminal", "xterm"],
+        &[
+            "alacritty",
+            "foot",
+            "kitty",
+            "wezterm",
+            "gnome-terminal",
+            "xterm",
+        ],
     );
     pick(
         &mut apps,
@@ -304,7 +311,11 @@ impl Config {
                         (parts.next(), parts.next(), parts.next())
                     {
                         if !command.is_empty() {
-                            let entry = AppEntry { icon, name, command };
+                            let entry = AppEntry {
+                                icon,
+                                name,
+                                command,
+                            };
                             match key.trim() {
                                 "desktop" => self.desktop.push(entry),
                                 "panel" => self.panel_apps.push(entry),

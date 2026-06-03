@@ -48,9 +48,13 @@ component WindowFrame inherits Rectangle {
     height: root.full-height * root.anim;
     x: tile.x + (root.full-width - root.width) / 2;
     y: tile.y + (root.full-height - root.height) / 2;
+    border-radius: tile.decorated ? 8px : 0px;
     border-width: tile.decorated ? 1px : 0px;
     border-color: tile.focused ? Theme.accent : Theme.hover;
     background: Theme.surface;
+    drop-shadow-blur: tile.decorated ? 18px : 0px;
+    drop-shadow-color: #00000099;
+    drop-shadow-offset-y: 5px;
 
     VerticalLayout {
         // Title bar (server-side decoration only).

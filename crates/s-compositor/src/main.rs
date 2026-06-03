@@ -117,8 +117,12 @@ fn main() -> anyhow::Result<()> {
     } else {
         loaded.panel_apps.clone()
     });
-    desktop.set_desktop_icons(ModelRc::from(Rc::new(VecModel::from(to_entries(&desktop_apps)))));
-    desktop.set_panel_launchers(ModelRc::from(Rc::new(VecModel::from(to_entries(&panel_apps)))));
+    desktop.set_desktop_icons(ModelRc::from(Rc::new(VecModel::from(to_entries(
+        &desktop_apps,
+    )))));
+    desktop.set_panel_launchers(ModelRc::from(Rc::new(VecModel::from(to_entries(
+        &panel_apps,
+    )))));
 
     // App launcher: filter the app list as the query changes.
     let launcher_model = Rc::new(VecModel::<MenuEntry>::default());
@@ -1943,7 +1947,10 @@ mod shot {
         }
         let (w, h) = (1280u32, 800u32);
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
-        slint::platform::set_platform(Box::new(SwPlatform { window: window.clone() })).unwrap();
+        slint::platform::set_platform(Box::new(SwPlatform {
+            window: window.clone(),
+        }))
+        .unwrap();
         window.set_size(slint::PhysicalSize::new(w, h));
 
         let d = Desktop::new().unwrap();
@@ -1976,11 +1983,23 @@ mod shot {
         let mut rgba = Vec::with_capacity(buf.len() * 4);
         for p in &buf {
             let a = p.alpha;
-            let u = |c: u8| if a == 0 || a == 255 { c } else { ((c as u16 * 255) / a as u16) as u8 };
+            let u = |c: u8| {
+                if a == 0 || a == 255 {
+                    c
+                } else {
+                    ((c as u16 * 255) / a as u16) as u8
+                }
+            };
             rgba.extend_from_slice(&[u(p.red), u(p.green), u(p.blue), a]);
         }
-        image::save_buffer("/tmp/desktop-icons.png", &rgba, w, h, image::ExtendedColorType::Rgba8)
-            .unwrap();
+        image::save_buffer(
+            "/tmp/desktop-icons.png",
+            &rgba,
+            w,
+            h,
+            image::ExtendedColorType::Rgba8,
+        )
+        .unwrap();
         eprintln!("wrote /tmp/desktop-icons.png");
         d.hide().unwrap();
     }
