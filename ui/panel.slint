@@ -7,6 +7,7 @@ export component Panel inherits Rectangle {
     in property <string> clock-time;
     in property <[WindowTile]> windows;
     callback toggle-launcher();
+    callback toggle-settings();
     callback activate(int);
 
     width: 56px;
@@ -31,6 +32,25 @@ export component Panel inherits Rectangle {
             launch-area := TouchArea {
                 clicked => {
                     root.toggle-launcher();
+                }
+            }
+        }
+
+        // Settings button.
+        Rectangle {
+            height: 40px;
+            border-radius: 8px;
+            background: settings-area.has-hover ? #313244 : #181825;
+            Text {
+                text: "⚙";
+                color: #f9e2af;
+                font-size: 18px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            settings-area := TouchArea {
+                clicked => {
+                    root.toggle-settings();
                 }
             }
         }

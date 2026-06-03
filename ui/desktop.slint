@@ -1,7 +1,9 @@
 import { Panel } from "panel.slint";
 import { Launcher } from "launcher.slint";
-import { WindowTile } from "types.slint";
-export { WindowTile }
+import { Settings } from "settings.slint";
+import { FileDialog } from "file_dialog.slint";
+import { WindowTile, FileItem } from "types.slint";
+export { WindowTile, FileItem }
 
 // Server-side decoration + input routing for one client window.
 component WindowFrame inherits Rectangle {
@@ -147,7 +149,16 @@ component WindowFrame inherits Rectangle {
 export component Desktop inherits Window {
     in property <string> clock-time;
     in property <[WindowTile]> windows;
+    in property <image> background-image;
     in-out property <bool> launcher-visible: false;
+    in-out property <bool> settings-visible: false;
+
+    // File dialog state (driven from Rust).
+    in-out property <bool> file-dialog-visible: false;
+    in property <string> file-dialog-title;
+    in property <string> file-dialog-path;
+    in property <[FileItem]> file-dialog-items;
+    in-out property <int> file-dialog-selected: -1;
 
     callback launch(string);
     callback close-window(int);
@@ -157,11 +168,26 @@ export component Desktop inherits Window {
     callback pointer-window(int, float, float, int, int);
     callback scroll-window(int, float, float);
     callback key-window(int, string, bool, bool, bool, bool);
+    callback change-background();
+    callback fd-entry-clicked(int);
+    callback fd-go-up();
+    callback fd-accept();
+    callback fd-cancel();
 
     preferred-width: 1280px;
     preferred-height: 800px;
     title: "slick";
     background: #1e1e2e;
+
+    // Desktop background image (behind everything).
+    Image {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        source: root.background-image;
+        image-fit: cover;
+    }
 
     for win in root.windows: WindowFrame {
         tile: win;
@@ -197,6 +223,9 @@ export component Desktop inherits Window {
         toggle-launcher => {
             root.launcher-visible = !root.launcher-visible;
         }
+        toggle-settings => {
+            root.settings-visible = !root.settings-visible;
+        }
         activate(id) => {
             root.activate-window(id);
         }
@@ -213,6 +242,43 @@ export component Desktop inherits Window {
         }
         dismiss => {
             root.launcher-visible = false;
+        }
+    }
+
+    if root.settings-visible: Settings {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        change-background => {
+            root.settings-visible = false;
+            root.change-background();
+        }
+        close => {
+            root.settings-visible = false;
+        }
+    }
+
+    if root.file-dialog-visible: FileDialog {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        title: root.file-dialog-title;
+        path: root.file-dialog-path;
+        items: root.file-dialog-items;
+        selected <=> root.file-dialog-selected;
+        entry-clicked(i) => {
+            root.fd-entry-clicked(i);
+        }
+        go-up => {
+            root.fd-go-up();
+        }
+        accept => {
+            root.fd-accept();
+        }
+        cancel => {
+            root.fd-cancel();
         }
     }
 }

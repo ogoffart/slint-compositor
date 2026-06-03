@@ -1,0 +1,111 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { FileItem } from "types.slint";
+
+// A reusable file-open dialog. It is driven entirely from Rust (which fills
+// `path`/`items` and handles navigation), so the same dialog backs both the
+// in-shell settings flow and the XDG desktop portal.
+export component FileDialog inherits Rectangle {
+    in property <string> title: "Open File";
+    in property <string> path;
+    in property <[FileItem]> items;
+    in-out property <int> selected: -1;
+
+    callback entry-clicked(int);
+    callback go-up();
+    callback accept();
+    callback cancel();
+
+    background: #000000aa;
+
+    // Click outside the panel to cancel.
+    TouchArea {
+        clicked => {
+            root.cancel();
+        }
+    }
+
+    Rectangle {
+        width: 640px;
+        height: 480px;
+        background: #1e1e2e;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: #45475a;
+
+        TouchArea {} // swallow clicks on the panel
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+
+            Text {
+                text: root.title;
+                color: #cdd6f4;
+                font-size: 16px;
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Button {
+                    text: "⬆ Up";
+                    clicked => {
+                        root.go-up();
+                    }
+                }
+                Text {
+                    text: root.path;
+                    color: #a6adc8;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    alignment: start;
+                    for item[idx] in root.items: Rectangle {
+                        height: 28px;
+                        background: idx == root.selected ? #585b70
+                            : (entry-area.has-hover ? #313244 : transparent);
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            Text {
+                                text: item.is-dir ? item.name + "/" : item.name;
+                                color: item.is-dir ? #89b4fa : #cdd6f4;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                        entry-area := TouchArea {
+                            clicked => {
+                                root.entry-clicked(idx);
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                Button {
+                    text: "Cancel";
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+                Button {
+                    text: "Open";
+                    enabled: root.selected >= 0;
+                    clicked => {
+                        root.accept();
+                    }
+                }
+            }
+        }
+    }
+}
