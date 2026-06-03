@@ -159,6 +159,18 @@ fn main() -> anyhow::Result<()> {
         let file_dialog = file_dialog.clone();
         move || file_dialog.borrow_mut().cancel()
     });
+    desktop.on_fd_navigate_to({
+        let file_dialog = file_dialog.clone();
+        move |path| file_dialog.borrow_mut().navigate_to(path.as_str())
+    });
+    desktop.on_fd_move_selection({
+        let file_dialog = file_dialog.clone();
+        move |delta| file_dialog.borrow_mut().move_selection(delta)
+    });
+    desktop.on_fd_activate_selected({
+        let file_dialog = file_dialog.clone();
+        move || file_dialog.borrow_mut().activate_selected()
+    });
 
     // Minimize: hide the window (it stays in the taskbar).
     desktop.on_minimize_window({
