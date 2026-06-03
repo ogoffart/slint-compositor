@@ -11,13 +11,45 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
-use zbus::zvariant::{ObjectPath, OwnedValue, Value};
+use zbus::zvariant::{ObjectPath, OwnedValue, Structure, Value};
 
 /// A file-open request from the portal, to be served on the UI thread.
 pub struct Request {
     pub title: String,
     pub reply: async_channel::Sender<Option<PathBuf>>,
+}
+
+/// Appearance settings published over `org.freedesktop.appearance`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Appearance {
+    /// 0 = no preference, 1 = prefer dark, 2 = prefer light.
+    pub scheme: u32,
+    /// Accent colour as RGB components in 0..1.
+    pub accent: (f64, f64, f64),
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            scheme: 1,
+            accent: (0.54, 0.71, 0.98),
+        }
+    }
+}
+
+const APPEARANCE_NS: &str = "org.freedesktop.appearance";
+
+fn scheme_value(scheme: u32) -> OwnedValue {
+    Value::from(scheme).try_into().expect("u32 -> OwnedValue")
+}
+
+fn accent_value(accent: (f64, f64, f64)) -> OwnedValue {
+    let structure = Structure::from((accent.0, accent.1, accent.2));
+    Value::from(structure)
+        .try_into()
+        .expect("(ddd) -> OwnedValue")
 }
 
 /// The well-known DBus name and object path of our portal backend.
@@ -73,29 +105,101 @@ impl FileChooser {
     }
 }
 
+/// Implements `org.freedesktop.impl.portal.Settings`, publishing the accent
+/// colour and light/dark scheme so other apps can match the shell.
+struct Settings {
+    appearance: Arc<Mutex<Appearance>>,
+}
+
+#[zbus::interface(name = "org.freedesktop.impl.portal.Settings")]
+impl Settings {
+    async fn read_all(
+        &self,
+        _namespaces: Vec<String>,
+    ) -> HashMap<String, HashMap<String, OwnedValue>> {
+        let appearance = *self.appearance.lock().unwrap();
+        let mut values = HashMap::new();
+        values.insert("color-scheme".to_string(), scheme_value(appearance.scheme));
+        values.insert("accent-color".to_string(), accent_value(appearance.accent));
+        HashMap::from([(APPEARANCE_NS.to_string(), values)])
+    }
+
+    async fn read(&self, namespace: String, key: String) -> zbus::fdo::Result<OwnedValue> {
+        let appearance = *self.appearance.lock().unwrap();
+        match (namespace.as_str(), key.as_str()) {
+            (APPEARANCE_NS, "color-scheme") => Ok(scheme_value(appearance.scheme)),
+            (APPEARANCE_NS, "accent-color") => Ok(accent_value(appearance.accent)),
+            _ => Err(zbus::fdo::Error::Failed(format!(
+                "no such setting {namespace}/{key}"
+            ))),
+        }
+    }
+}
+
 /// Spawn the portal backend on its own thread. Failures (e.g. no session bus)
 /// are logged and otherwise ignored — the shell keeps running.
-pub fn spawn(requests: async_channel::Sender<Request>) {
+pub fn spawn(
+    requests: async_channel::Sender<Request>,
+    appearance: Arc<Mutex<Appearance>>,
+    updates: async_channel::Receiver<Appearance>,
+) {
     std::thread::Builder::new()
         .name("s-compositor-portal".into())
         .spawn(move || {
-            if let Err(err) = zbus::block_on(serve(requests)) {
-                log::warn!("file chooser portal unavailable: {err}");
+            if let Err(err) = zbus::block_on(serve(requests, appearance, updates)) {
+                log::warn!("desktop portal unavailable: {err}");
             }
         })
         .ok();
 }
 
-async fn serve(requests: async_channel::Sender<Request>) -> zbus::Result<()> {
-    let _conn = zbus::connection::Builder::session()?
+async fn serve(
+    requests: async_channel::Sender<Request>,
+    appearance: Arc<Mutex<Appearance>>,
+    updates: async_channel::Receiver<Appearance>,
+) -> zbus::Result<()> {
+    let conn = zbus::connection::Builder::session()?
         .name(BUS_NAME)?
         .serve_at(OBJECT_PATH, FileChooser { requests })?
+        .serve_at(
+            OBJECT_PATH,
+            Settings {
+                appearance: appearance.clone(),
+            },
+        )?
         .build()
         .await?;
-    log::info!("file chooser portal registered as {BUS_NAME}");
-    // Keep the connection alive for the lifetime of the process.
-    std::future::pending::<()>().await;
+    log::info!("desktop portal registered as {BUS_NAME}");
+
+    // Publish appearance changes coming from the UI thread, emitting the
+    // standard SettingChanged signal so apps update live. Recv keeps the
+    // connection alive for the lifetime of the process.
+    while let Ok(next) = updates.recv().await {
+        *appearance.lock().unwrap() = next;
+        emit_setting_changed(&conn, "color-scheme", Value::from(next.scheme)).await;
+        let accent = Value::from(Structure::from((
+            next.accent.0,
+            next.accent.1,
+            next.accent.2,
+        )));
+        emit_setting_changed(&conn, "accent-color", accent).await;
+    }
     Ok(())
+}
+
+async fn emit_setting_changed(conn: &zbus::Connection, key: &str, value: Value<'_>) {
+    if let Err(err) = conn
+        .emit_signal(
+            None::<&str>,
+            OBJECT_PATH,
+            "org.freedesktop.impl.portal.Settings",
+            "SettingChanged",
+            &(APPEARANCE_NS, key, value),
+        )
+        .await
+    {
+        log::warn!("failed to emit SettingChanged: {err}");
+    }
 }
 
 /// Convert a path to a `file://` URI, percent-encoding unsafe bytes.

@@ -1,3 +1,4 @@
+import { Theme } from "theme.slint";
 import { Button, ScrollView, LineEdit } from "std-widgets.slint";
 import { FileItem } from "types.slint";
 
@@ -18,7 +19,7 @@ export component FileDialog inherits Rectangle {
     callback move-selection(int);     // keyboard arrow delta (+1/-1)
     callback activate-selected();     // Enter: open file or enter directory
 
-    background: #000000aa;
+    background: Theme.overlay;
 
     // Focus the keyboard handler as soon as the dialog appears.
     init => {
@@ -35,10 +36,10 @@ export component FileDialog inherits Rectangle {
     Rectangle {
         width: 640px;
         height: 480px;
-        background: #1e1e2e;
+        background: Theme.bg;
         border-radius: 10px;
         border-width: 1px;
-        border-color: #45475a;
+        border-color: Theme.hover;
 
         TouchArea {} // swallow clicks on the panel
 
@@ -48,7 +49,7 @@ export component FileDialog inherits Rectangle {
 
             Text {
                 text: root.title;
-                color: #cdd6f4;
+                color: Theme.fg;
                 font-size: 16px;
             }
 
@@ -100,13 +101,13 @@ export component FileDialog inherits Rectangle {
                         alignment: start;
                         for item[idx] in root.items: Rectangle {
                             height: 28px;
-                            background: idx == root.selected ? #585b70
-                                : (entry-area.has-hover ? #313244 : transparent);
+                            background: idx == root.selected ? Theme.accent
+                                : (entry-area.has-hover ? Theme.surface : transparent);
                             HorizontalLayout {
                                 padding-left: 8px;
                                 Text {
                                     text: item.is-dir ? item.name + "/" : item.name;
-                                    color: item.is-dir ? #89b4fa : #cdd6f4;
+                                    color: item.is-dir ? Theme.accent : Theme.fg;
                                     font-size: 13px;
                                     vertical-alignment: center;
                                     overflow: elide;

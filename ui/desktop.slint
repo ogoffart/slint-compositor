@@ -1,9 +1,11 @@
+import { Theme } from "theme.slint";
 import { Panel } from "panel.slint";
 import { Launcher } from "launcher.slint";
 import { Settings } from "settings.slint";
 import { FileDialog } from "file_dialog.slint";
 import { WindowTile, FileItem } from "types.slint";
 export { WindowTile, FileItem }
+export { Theme }
 
 // Server-side decoration + input routing for one client window.
 component WindowFrame inherits Rectangle {
@@ -27,14 +29,14 @@ component WindowFrame inherits Rectangle {
     width: tile.width;
     height: tile.decorated ? tile.height + 28px : tile.height;
     border-width: tile.decorated ? 1px : 0px;
-    border-color: tile.focused ? #89b4fa : #45475a;
-    background: #313244;
+    border-color: tile.focused ? Theme.accent : Theme.hover;
+    background: Theme.surface;
 
     VerticalLayout {
         // Title bar (server-side decoration only).
         if tile.decorated: Rectangle {
             height: 28px;
-            background: tile.focused ? #45475a : #313244;
+            background: tile.focused ? Theme.hover : Theme.surface;
 
             HorizontalLayout {
                 padding-left: 8px;
@@ -43,7 +45,7 @@ component WindowFrame inherits Rectangle {
 
                 Text {
                     text: tile.title == "" ? "(untitled)" : tile.title;
-                    color: #cdd6f4;
+                    color: Theme.fg;
                     font-size: 13px;
                     vertical-alignment: center;
                     overflow: elide;
@@ -55,10 +57,10 @@ component WindowFrame inherits Rectangle {
                     y: 3px;
                     height: 22px;
                     border-radius: 4px;
-                    background: min-ta.has-hover ? #45475a : transparent;
+                    background: min-ta.has-hover ? Theme.hover : transparent;
                     Text {
                         text: "—";
-                        color: #cdd6f4;
+                        color: Theme.fg;
                         font-size: 12px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -74,10 +76,10 @@ component WindowFrame inherits Rectangle {
                     y: 3px;
                     height: 22px;
                     border-radius: 4px;
-                    background: max-ta.has-hover ? #45475a : transparent;
+                    background: max-ta.has-hover ? Theme.hover : transparent;
                     Text {
                         text: tile.maximized ? "▣" : "□";
-                        color: #cdd6f4;
+                        color: Theme.fg;
                         font-size: 12px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -96,7 +98,7 @@ component WindowFrame inherits Rectangle {
                     background: close-ta.has-hover ? #f38ba8 : transparent;
                     Text {
                         text: "✕";
-                        color: close-ta.has-hover ? #11111b : #cdd6f4;
+                        color: close-ta.has-hover ? #11111b : Theme.fg;
                         font-size: 13px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -177,7 +179,7 @@ component WindowFrame inherits Rectangle {
         height: 16px;
         x: parent.width - self.width;
         y: parent.height - self.height;
-        background: grip.has-hover ? #585b70 : transparent;
+        background: grip.has-hover ? Theme.accent : transparent;
         grip := TouchArea {
             mouse-cursor: nwse-resize;
             moved => {
@@ -222,11 +224,12 @@ export component Desktop inherits Window {
     callback fd-navigate-to(string);
     callback fd-move-selection(int);
     callback fd-activate-selected();
+    callback settings-changed();
 
     preferred-width: 1280px;
     preferred-height: 800px;
     title: "s-compositor";
-    background: #1e1e2e;
+    background: Theme.bg;
 
     // Desktop background image (behind everything).
     Image {
@@ -312,6 +315,9 @@ export component Desktop inherits Window {
         change-background => {
             root.settings-visible = false;
             root.change-background();
+        }
+        changed => {
+            root.settings-changed();
         }
         close => {
             root.settings-visible = false;

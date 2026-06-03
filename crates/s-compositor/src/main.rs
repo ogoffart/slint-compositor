@@ -13,6 +13,7 @@ use std::time::Duration;
 use chrono::Local;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
+mod config;
 mod file_dialog;
 mod gl_bridge;
 mod portal;
@@ -51,6 +52,11 @@ fn main() -> anyhow::Result<()> {
         })?;
 
     let desktop = Desktop::new()?;
+
+    // Load persisted settings from the working directory and apply them.
+    let loaded = config::Config::load();
+    let bg_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(loaded.background.clone()));
+    apply_config(&desktop, &loaded);
 
     let model = Rc::new(VecModel::<WindowTile>::default());
     desktop.set_windows(ModelRc::from(model.clone()));
@@ -119,15 +125,20 @@ fn main() -> anyhow::Result<()> {
         file_dialog::Controller::new(desktop.as_weak(), fd_items),
     ));
 
-    // Expose the file dialog to other apps via the XDG FileChooser portal.
+    // Expose the file dialog and the appearance settings to other apps via the
+    // XDG desktop portal.
     let (portal_tx, portal_rx) = async_channel::unbounded::<portal::Request>();
-    portal::spawn(portal_tx);
+    let appearance = std::sync::Arc::new(std::sync::Mutex::new(current_appearance(&desktop)));
+    let (appearance_tx, appearance_rx) = async_channel::unbounded::<portal::Appearance>();
+    portal::spawn(portal_tx, appearance.clone(), appearance_rx);
 
     desktop.on_change_background({
         let file_dialog = file_dialog.clone();
         let weak = desktop.as_weak();
+        let bg_path = bg_path.clone();
         move || {
             let weak = weak.clone();
+            let bg_path = bg_path.clone();
             file_dialog.borrow_mut().open(
                 "Select background image",
                 file_dialog::home_dir(),
@@ -135,12 +146,29 @@ fn main() -> anyhow::Result<()> {
                 Box::new(move |path| {
                     if let (Some(path), Some(d)) = (path, weak.upgrade()) {
                         match slint::Image::load_from_path(&path) {
-                            Ok(image) => d.set_background_image(image),
+                            Ok(image) => {
+                                d.set_background_image(image);
+                                *bg_path.borrow_mut() = Some(path.to_string_lossy().into_owned());
+                                current_config(&d, &bg_path).save();
+                            }
                             Err(err) => log::error!("failed to load image {path:?}: {err}"),
                         }
                     }
                 }),
             );
+        }
+    });
+
+    // Persist settings and publish appearance changes to the portal.
+    desktop.on_settings_changed({
+        let weak = desktop.as_weak();
+        let bg_path = bg_path.clone();
+        let appearance_tx = appearance_tx.clone();
+        move || {
+            if let Some(d) = weak.upgrade() {
+                current_config(&d, &bg_path).save();
+                let _ = appearance_tx.try_send(current_appearance(&d));
+            }
         }
     });
     desktop.on_fd_entry_clicked({
@@ -512,6 +540,58 @@ fn raise_and_focus(model: &Rc<VecModel<WindowTile>>, windows: &Rc<RefCell<Window
             }
         }
     }
+}
+
+/// Apply persisted settings to the UI.
+fn apply_config(d: &Desktop, c: &config::Config) {
+    let theme = d.global::<Theme>();
+    theme.set_dark(c.dark);
+    theme.set_accent(u32_to_color(c.accent));
+    d.set_panel_edge(c.panel_edge);
+    d.set_panel_size(c.panel_size);
+    if let Some(path) = &c.background {
+        if let Ok(image) = slint::Image::load_from_path(std::path::Path::new(path)) {
+            d.set_background_image(image);
+        }
+    }
+}
+
+/// Read the current settings out of the UI.
+fn current_config(d: &Desktop, bg: &Rc<RefCell<Option<String>>>) -> config::Config {
+    let theme = d.global::<Theme>();
+    config::Config {
+        dark: theme.get_dark(),
+        accent: color_to_u32(theme.get_accent()),
+        panel_edge: d.get_panel_edge(),
+        panel_size: d.get_panel_size(),
+        background: bg.borrow().clone(),
+    }
+}
+
+/// Build the portal appearance (color-scheme + accent) from the current theme.
+fn current_appearance(d: &Desktop) -> portal::Appearance {
+    let theme = d.global::<Theme>();
+    let c = theme.get_accent();
+    portal::Appearance {
+        scheme: if theme.get_dark() { 1 } else { 2 },
+        accent: (
+            c.red() as f64 / 255.0,
+            c.green() as f64 / 255.0,
+            c.blue() as f64 / 255.0,
+        ),
+    }
+}
+
+fn color_to_u32(c: slint::Color) -> u32 {
+    ((c.red() as u32) << 16) | ((c.green() as u32) << 8) | (c.blue() as u32)
+}
+
+fn u32_to_color(n: u32) -> slint::Color {
+    slint::Color::from_rgb_u8(
+        ((n >> 16) & 0xff) as u8,
+        ((n >> 8) & 0xff) as u8,
+        (n & 0xff) as u8,
+    )
 }
 
 /// The desktop work area `(x, y, w, h)` in logical pixels: the screen minus the
