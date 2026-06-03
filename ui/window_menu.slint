@@ -39,9 +39,12 @@ export component WindowMenu inherits Rectangle {
     in property <length> menu-x;
     in property <length> menu-y;
     in property <bool> maximized;
+    in property <int> workspace-count;
+    in property <int> current-workspace;
     callback minimize();
     callback toggle-maximize();
     callback close();
+    callback move-to-workspace(int);
     callback dismiss();
 
     TouchArea {
@@ -84,6 +87,21 @@ export component WindowMenu inherits Rectangle {
                 label: "Close";
                 clicked => {
                     root.close();
+                }
+            }
+            Rectangle {
+                height: 7px;
+                Rectangle {
+                    y: 3px;
+                    height: 1px;
+                    background: Theme.hover;
+                }
+            }
+            for i in root.workspace-count: MenuItem {
+                icon: i == root.current-workspace ? "●" : "○";
+                label: "Workspace \{i + 1}";
+                clicked => {
+                    root.move-to-workspace(i);
                 }
             }
         }

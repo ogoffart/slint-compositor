@@ -388,6 +388,7 @@ export component Desktop inherits Window {
     callback activate-window(int);                       // taskbar / raise + focus
     callback move-window(int, length, length);
     callback drop-window(int, length, length);   // window dropped at cursor (x,y)
+    callback window-move-to-workspace(int, int);  // window id, workspace index
     callback resize-window(int, length, length);
     callback pointer-window(int, float, float, int, int);
     callback scroll-window(int, float, float);
@@ -771,6 +772,8 @@ export component Desktop inherits Window {
         menu-x: root.window-menu-x;
         menu-y: root.window-menu-y;
         maximized: root.window-menu-maximized;
+        workspace-count: root.workspace-count;
+        current-workspace: root.active-workspace;
         minimize => {
             root.window-menu-visible = false;
             root.minimize-window(root.window-menu-id);
@@ -782,6 +785,10 @@ export component Desktop inherits Window {
         close => {
             root.window-menu-visible = false;
             root.close-window(root.window-menu-id);
+        }
+        move-to-workspace(ws) => {
+            root.window-menu-visible = false;
+            root.window-move-to-workspace(root.window-menu-id, ws);
         }
         dismiss => {
             root.window-menu-visible = false;

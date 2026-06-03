@@ -626,6 +626,21 @@ fn main() -> anyhow::Result<()> {
     });
 
     // Move a window by dragging its title bar.
+    // Move a specific window to a workspace (window menu).
+    desktop.on_window_move_to_workspace({
+        let model = model.clone();
+        let windows = windows.clone();
+        move |id, ws| {
+            let windows = windows.borrow();
+            if let Some(&row) = windows.rows.get(&(id as u64)) {
+                if let Some(mut tile) = model.row_data(row) {
+                    tile.workspace = ws;
+                    model.set_row_data(row, tile);
+                }
+            }
+        }
+    });
+
     desktop.on_move_window({
         let model = model.clone();
         let windows = windows.clone();
