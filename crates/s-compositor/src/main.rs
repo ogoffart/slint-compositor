@@ -35,6 +35,8 @@ struct Windows {
     focused: Option<u64>,
     /// Pre-maximize geometry (x, y, w, h) to restore on un-maximize.
     restore: HashMap<u64, (f32, f32, f32, f32)>,
+    /// popup id -> row index in the popups model.
+    popup_rows: HashMap<u64, usize>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -60,6 +62,8 @@ fn main() -> anyhow::Result<()> {
 
     let model = Rc::new(VecModel::<WindowTile>::default());
     desktop.set_windows(ModelRc::from(model.clone()));
+    let popups_model = Rc::new(VecModel::<PopupTile>::default());
+    desktop.set_popups(ModelRc::from(popups_model.clone()));
     let windows = Rc::new(RefCell::new(Windows::default()));
     let bridge = Rc::new(RefCell::new(GlBridge::default()));
     // (WAYLAND_DISPLAY, XDG_RUNTIME_DIR) of s-compositor's compositor, learned from Ready.
@@ -73,6 +77,7 @@ fn main() -> anyhow::Result<()> {
             let bridge = bridge.clone();
             let windows = windows.clone();
             let model = model.clone();
+            let popups_model = popups_model.clone();
             move |state, graphics_api| match state {
                 slint::RenderingState::RenderingSetup => {
                     if let slint::GraphicsAPI::NativeOpenGL { get_proc_address } = graphics_api {
@@ -99,6 +104,13 @@ fn main() -> anyhow::Result<()> {
                                 tile.width = frame.width as f32;
                                 tile.height = frame.height as f32;
                                 model.set_row_data(row, tile);
+                            }
+                        } else if let Some(&row) = windows.popup_rows.get(&id) {
+                            if let Some(mut tile) = popups_model.row_data(row) {
+                                tile.texture = image;
+                                tile.width = frame.width as f32;
+                                tile.height = frame.height as f32;
+                                popups_model.set_row_data(row, tile);
                             }
                         }
                     }
@@ -282,9 +294,19 @@ fn main() -> anyhow::Result<()> {
         let windows = windows.clone();
         move |id| {
             raise_and_focus(&model, &windows, id as u64);
+            // Clicking a window dismisses any open menus.
+            let _ = cmd_tx.send(s_compositor_wayland::Command::DismissPopups);
             let _ = cmd_tx.send(s_compositor_wayland::Command::FocusWindow(
                 s_compositor_wayland::WindowId(id as u64),
             ));
+        }
+    });
+
+    // Clicking the empty desktop dismisses open popups.
+    desktop.on_dismiss_popups({
+        let cmd_tx = cmd_tx.clone();
+        move || {
+            let _ = cmd_tx.send(s_compositor_wayland::Command::DismissPopups);
         }
     });
 
@@ -389,12 +411,13 @@ fn main() -> anyhow::Result<()> {
         let weak = desktop.as_weak();
         let windows = windows.clone();
         let model = model.clone();
+        let popups_model = popups_model.clone();
         let wayland_env = wayland_env.clone();
         let file_dialog = file_dialog.clone();
         move || {
             let mut dirty = false;
             while let Ok(event) = rx.try_recv() {
-                dirty |= handle_event(event, &model, &windows, &wayland_env);
+                dirty |= handle_event(event, &model, &popups_model, &windows, &wayland_env);
             }
             // Serve pending portal file-open requests with the same dialog.
             while let Ok(request) = portal_rx.try_recv() {
@@ -424,6 +447,7 @@ fn main() -> anyhow::Result<()> {
 fn handle_event(
     event: s_compositor_wayland::Event,
     model: &Rc<VecModel<WindowTile>>,
+    popups_model: &Rc<VecModel<PopupTile>>,
     windows: &Rc<RefCell<Windows>>,
     wayland_env: &Rc<RefCell<Option<(String, String)>>>,
 ) -> bool {
@@ -506,11 +530,92 @@ fn handle_event(
             }
             true
         }
+        Event::PopupBuffer {
+            id,
+            parent,
+            ox,
+            oy,
+            width,
+            height,
+            pixels,
+        } => {
+            let mut windows = windows.borrow_mut();
+            let (px, py) = popup_origin(model, popups_model, &windows, parent);
+            let (x, y) = (px + ox as f32, py + oy as f32);
+            if let Some(&row) = windows.popup_rows.get(&id.0) {
+                if let Some(mut tile) = popups_model.row_data(row) {
+                    tile.x = x;
+                    tile.y = y;
+                    tile.width = width as f32;
+                    tile.height = height as f32;
+                    popups_model.set_row_data(row, tile);
+                }
+            } else {
+                let row = popups_model.row_count();
+                popups_model.push(PopupTile {
+                    id: id.0 as i32,
+                    texture: slint::Image::default(),
+                    x,
+                    y,
+                    width: width as f32,
+                    height: height as f32,
+                });
+                windows.popup_rows.insert(id.0, row);
+            }
+            windows.pending.insert(
+                id.0,
+                Frame {
+                    width,
+                    height,
+                    pixels,
+                },
+            );
+            true
+        }
+        Event::PopupRemoved(id) => {
+            let mut windows = windows.borrow_mut();
+            windows.pending.remove(&id.0);
+            if let Some(removed) = windows.popup_rows.remove(&id.0) {
+                popups_model.remove(removed);
+                for row in windows.popup_rows.values_mut() {
+                    if *row > removed {
+                        *row -= 1;
+                    }
+                }
+                windows.closed.push(id.0);
+            }
+            true
+        }
         other => {
             log::info!("compositor event: {other:?}");
             false
         }
     }
+}
+
+/// The on-screen origin a popup is positioned against: its parent window's
+/// content origin (below the title bar) or its parent popup's origin.
+fn popup_origin(
+    model: &Rc<VecModel<WindowTile>>,
+    popups_model: &Rc<VecModel<PopupTile>>,
+    windows: &Windows,
+    parent: Option<s_compositor_wayland::WindowId>,
+) -> (f32, f32) {
+    let Some(parent) = parent else {
+        return (0.0, 0.0);
+    };
+    if let Some(&row) = windows.rows.get(&parent.0) {
+        if let Some(tile) = model.row_data(row) {
+            let titlebar = if tile.decorated { 28.0 } else { 0.0 };
+            return (tile.x, tile.y + titlebar);
+        }
+    }
+    if let Some(&row) = windows.popup_rows.get(&parent.0) {
+        if let Some(tile) = popups_model.row_data(row) {
+            return (tile.x, tile.y);
+        }
+    }
+    (0.0, 0.0)
 }
 
 /// Raise a window to the top of the stack and mark it focused. Rebuilds the

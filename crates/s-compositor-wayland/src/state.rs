@@ -15,7 +15,7 @@ use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
-use smithay::wayland::shell::xdg::{ToplevelSurface, XdgShellState};
+use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 
 use s_compositor_shell::WindowId;
@@ -44,6 +44,9 @@ pub struct SlickState {
     /// Mapped toplevel windows, keyed by their root `wl_surface`.
     pub windows: HashMap<WlSurface, WindowEntry>,
 
+    /// Mapped popups (menus etc.), keyed by their `wl_surface`.
+    pub popups: HashMap<WlSurface, PopupEntry>,
+
     /// Start of the compositor, used to timestamp `wl_callback.done`.
     pub start_time: Instant,
 
@@ -64,6 +67,16 @@ pub struct WindowEntry {
     pub decorated: bool,
 }
 
+/// A tracked popup (menu, dropdown, tooltip).
+pub struct PopupEntry {
+    pub id: WindowId,
+    pub popup: PopupSurface,
+    /// The id of the parent window/popup this is positioned against.
+    pub parent_id: Option<WindowId>,
+    /// Offset from the parent surface, from the positioner geometry.
+    pub offset: (i32, i32),
+}
+
 impl SlickState {
     /// Allocate the next stable window id.
     pub fn allocate_window_id(&mut self) -> WindowId {
@@ -77,12 +90,26 @@ impl SlickState {
         self.start_time.elapsed().as_millis() as u32
     }
 
-    /// The `wl_surface` of the window with the given id, if mapped.
+    /// The `wl_surface` of the window or popup with the given id, if mapped.
     pub fn surface_for(&self, id: WindowId) -> Option<WlSurface> {
         self.windows
             .values()
             .find(|e| e.id == id)
             .map(|e| e.toplevel.wl_surface().clone())
+            .or_else(|| {
+                self.popups
+                    .values()
+                    .find(|e| e.id == id)
+                    .map(|e| e.popup.wl_surface().clone())
+            })
+    }
+
+    /// The window/popup id owning a surface (to resolve a popup's parent).
+    pub fn id_of_surface(&self, surface: &WlSurface) -> Option<WindowId> {
+        self.windows
+            .get(surface)
+            .map(|e| e.id)
+            .or_else(|| self.popups.get(surface).map(|e| e.id))
     }
 }
 
