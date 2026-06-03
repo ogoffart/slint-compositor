@@ -13,8 +13,8 @@ import { WindowSwitcher } from "window_switcher.slint";
 import { Osd } from "osd.slint";
 import { Settings } from "settings.slint";
 import { FileDialog } from "file_dialog.slint";
-import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification, CalendarDay } from "types.slint";
-export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification, CalendarDay }
+import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification, CalendarDay, OutputRect } from "types.slint";
+export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification, CalendarDay, OutputRect }
 export { Theme }
 
 // Server-side decoration + input routing for one client window.
@@ -291,6 +291,8 @@ export component Desktop inherits Window {
     in property <[PopupTile]> popups;
     in property <[LayerTile]> layers;
     in property <image> background-image;
+    // Output (monitor) regions; the shell draws a panel + wallpaper per output.
+    in property <[OutputRect]> outputs: [{ x: 0, y: 0, width: 1280px, height: 800px }];
     in-out property <int> panel-edge: 0;        // 0=Right 1=Left 2=Top 3=Bottom
     in-out property <length> panel-size: 72px;
 
@@ -442,12 +444,12 @@ export component Desktop inherits Window {
             Theme.panel 100%);
     }
 
-    // Desktop background image (behind everything).
-    Image {
-        x: 0;
-        y: 0;
-        width: 100%;
-        height: 100%;
+    // Desktop background image (behind everything), one per output.
+    for out in root.outputs: Image {
+        x: out.x;
+        y: out.y;
+        width: out.width;
+        height: out.height;
         source: root.background-image;
         image-fit: cover;
     }
@@ -479,8 +481,8 @@ export component Desktop inherits Window {
     // Desktop shortcut icons, in a column near the top-left corner (offset to
     // clear the panel when it is docked left or top). Double-click to launch.
     VerticalLayout {
-        x: (root.panel-edge == 1 ? root.panel-size : 0px) + 14px;
-        y: (root.panel-edge == 2 ? root.panel-size : 0px) + 14px;
+        x: root.outputs[0].x + (root.panel-edge == 1 ? root.panel-size : 0px) + 14px;
+        y: root.outputs[0].y + (root.panel-edge == 2 ? root.panel-size : 0px) + 14px;
         width: 96px;
         spacing: 8px;
         alignment: start;
@@ -595,7 +597,7 @@ export component Desktop inherits Window {
         }
     }
 
-    Panel {
+    for out in root.outputs: Panel {
         clock-hours: root.clock-hours;
         clock-minutes: root.clock-minutes;
         cursor-x: root.cursor-x;
@@ -609,10 +611,10 @@ export component Desktop inherits Window {
         muted: root.muted;
         horizontal: root.panel-edge >= 2;
         edge: root.panel-edge;
-        width: root.panel-edge >= 2 ? parent.width : root.panel-size;
-        height: root.panel-edge >= 2 ? root.panel-size : parent.height;
-        x: root.panel-edge == 0 ? parent.width - root.panel-size : 0px;
-        y: root.panel-edge == 3 ? parent.height - root.panel-size : 0px;
+        width: root.panel-edge >= 2 ? out.width : root.panel-size;
+        height: root.panel-edge >= 2 ? root.panel-size : out.height;
+        x: out.x + (root.panel-edge == 0 ? out.width - root.panel-size : 0px);
+        y: out.y + (root.panel-edge == 3 ? out.height - root.panel-size : 0px);
         toggle-start-menu => {
             root.start-menu-visible = !root.start-menu-visible;
         }

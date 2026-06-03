@@ -125,6 +125,16 @@ fn main() -> anyhow::Result<()> {
     desktop.set_menu_entries(ModelRc::from(menu_model.clone()));
     desktop.set_desktop_icons(ModelRc::from(desktop_model.clone()));
     desktop.set_panel_launchers(ModelRc::from(panel_model.clone()));
+
+    // Output (monitor) layout. Seeded with a single default output; replaced by
+    // the real layout when the compositor reports it via `Event::Ready`.
+    let outputs_model = Rc::new(VecModel::<OutputRect>::from(vec![OutputRect {
+        x: 0.0,
+        y: 0.0,
+        width: 1280.0,
+        height: 800.0,
+    }]));
+    desktop.set_outputs(ModelRc::from(outputs_model.clone()));
     desktop.set_terminal_command(config::terminal_command().into());
 
     // App launcher: filter the (live) start-menu list as the query changes.
@@ -858,6 +868,7 @@ fn main() -> anyhow::Result<()> {
         let popups_model = popups_model.clone();
         let layers_model = layers_model.clone();
         let wayland_env = wayland_env.clone();
+        let outputs_model = outputs_model.clone();
         let file_dialog = file_dialog.clone();
         let cmd_tx = cmd_tx.clone();
         let icon_cache = icon_cache.clone();
@@ -962,6 +973,41 @@ fn main() -> anyhow::Result<()> {
                 .map(|d| d.get_active_workspace())
                 .unwrap_or(0);
             while let Ok(event) = rx.try_recv() {
+                // The compositor reported its output layout: size the window to the
+                // bounding box of all monitors and publish the per-output rects.
+                if let s_compositor_wayland::Event::Ready {
+                    socket_name,
+                    runtime_dir,
+                    outputs,
+                } = &event
+                {
+                    log::info!(
+                        "compositor ready on WAYLAND_DISPLAY={socket_name} \
+                         (XDG_RUNTIME_DIR={runtime_dir}, {} output(s))",
+                        outputs.len()
+                    );
+                    *wayland_env.borrow_mut() =
+                        Some((socket_name.clone(), runtime_dir.clone()));
+                    let bw = outputs.iter().map(|o| o.x + o.w).max().unwrap_or(1280).max(1);
+                    let bh = outputs.iter().map(|o| o.y + o.h).max().unwrap_or(800).max(1);
+                    outputs_model.set_vec(
+                        outputs
+                            .iter()
+                            .map(|o| OutputRect {
+                                x: o.x as f32,
+                                y: o.y as f32,
+                                width: o.w as f32,
+                                height: o.h as f32,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                    if let Some(d) = weak.upgrade() {
+                        d.window()
+                            .set_size(slint::PhysicalSize::new(bw as u32, bh as u32));
+                    }
+                    dirty = true;
+                    continue;
+                }
                 // Client-initiated (un)maximize reuses the work-area logic so it
                 // never covers the panel.
                 if let s_compositor_wayland::Event::WindowMaximizeRequested { id, maximized } =
@@ -1021,22 +1067,15 @@ fn handle_event(
     popups_model: &Rc<VecModel<PopupTile>>,
     layers_model: &Rc<VecModel<LayerTile>>,
     windows: &Rc<RefCell<Windows>>,
-    wayland_env: &Rc<RefCell<Option<(String, String)>>>,
+    _wayland_env: &Rc<RefCell<Option<(String, String)>>>,
     icon_cache: &Rc<icons::IconCache>,
     active_workspace: i32,
 ) -> bool {
     use s_compositor_wayland::Event;
     match event {
-        Event::Ready {
-            socket_name,
-            runtime_dir,
-        } => {
-            log::info!(
-                "compositor ready on WAYLAND_DISPLAY={socket_name} (XDG_RUNTIME_DIR={runtime_dir})"
-            );
-            *wayland_env.borrow_mut() = Some((socket_name, runtime_dir));
-            false
-        }
+        // `Ready` is intercepted at the call site (it needs the window handle to
+        // size the canvas to the output layout), so it never reaches here.
+        Event::Ready { .. } => false,
         Event::WindowBuffer {
             id,
             width,
@@ -1381,7 +1420,7 @@ fn snap_window(
     let Some(mut tile) = model.row_data(row) else {
         return;
     };
-    let (wx, wy, ww, wh) = work_area(d);
+    let (wx, wy, ww, wh) = work_area(d, tile.x + tile.width / 2.0, tile.y + tile.height / 2.0);
     let (x, y, width, height) = match snap {
         Snap::Left => (wx, wy, ww / 2.0, wh),
         Snap::Right => (wx + ww / 2.0, wy, ww / 2.0, wh),
@@ -1672,7 +1711,7 @@ fn set_maximized(
         windows
             .restore
             .insert(id, (tile.x, tile.y, tile.width, tile.height));
-        let (x, y, w, h) = work_area(d);
+        let (x, y, w, h) = work_area(d, tile.x + tile.width / 2.0, tile.y + tile.height / 2.0);
         let titlebar = if tile.decorated { 28.0 } else { 0.0 };
         tile.x = x;
         tile.y = y;
@@ -1894,16 +1933,33 @@ fn image_from_rgba(width: u32, height: u32, pixels: &[u8]) -> slint::Image {
 
 /// The desktop work area `(x, y, w, h)` in logical pixels: the screen minus the
 /// panel on its docked edge.
-fn work_area(d: &Desktop) -> (f32, f32, f32, f32) {
-    let scale = d.window().scale_factor().max(0.01);
-    let size = d.window().size();
-    let (sw, sh) = (size.width as f32 / scale, size.height as f32 / scale);
+/// The usable area (minus the panel) of the output containing the point
+/// `(cx, cy)` — used to maximize/tile a window onto its own monitor. Falls back
+/// to the first output, then the whole canvas.
+fn work_area(d: &Desktop, cx: f32, cy: f32) -> (f32, f32, f32, f32) {
+    let outputs = d.get_outputs();
+    let mut found = None;
+    for i in 0..outputs.row_count() {
+        if let Some(o) = outputs.row_data(i) {
+            if cx >= o.x && cx < o.x + o.width && cy >= o.y && cy < o.y + o.height {
+                found = Some((o.x, o.y, o.width, o.height));
+                break;
+            }
+        }
+    }
+    let (ox, oy, ow, oh) = found
+        .or_else(|| outputs.row_data(0).map(|o| (o.x, o.y, o.width, o.height)))
+        .unwrap_or_else(|| {
+            let scale = d.window().scale_factor().max(0.01);
+            let size = d.window().size();
+            (0.0, 0.0, size.width as f32 / scale, size.height as f32 / scale)
+        });
     let panel = d.get_panel_size();
     match d.get_panel_edge() {
-        1 => (panel, 0.0, sw - panel, sh), // Left
-        2 => (0.0, panel, sw, sh - panel), // Top
-        3 => (0.0, 0.0, sw, sh - panel),   // Bottom
-        _ => (0.0, 0.0, sw - panel, sh),   // Right (default)
+        1 => (ox + panel, oy, ow - panel, oh), // Left
+        2 => (ox, oy + panel, ow, oh - panel), // Top
+        3 => (ox, oy, ow, oh - panel),         // Bottom
+        _ => (ox, oy, ow - panel, oh),         // Right (default)
     }
 }
 
@@ -2173,7 +2229,8 @@ mod shot {
         if std::env::var("SCOMP_SHOT").is_err() {
             return;
         }
-        let (w, h) = (1280u32, 800u32);
+        let multi = std::env::var("SCOMP_SHOT_MULTI").is_ok();
+        let (w, h) = if multi { (2560u32, 800u32) } else { (1280u32, 800u32) };
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
         slint::platform::set_platform(Box::new(SwPlatform {
             window: window.clone(),
@@ -2205,6 +2262,34 @@ mod shot {
             ("🌐", "Browser", "firefox"),
         ]));
         d.set_panel_launchers(model(vec![("🗂", "Files", "s-files")]));
+
+        // A simple gradient wallpaper so the per-output background is visible.
+        let mut bg = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(64, 48);
+        {
+            let px = bg.make_mut_bytes();
+            for y in 0..48u32 {
+                for x in 0..64u32 {
+                    let i = ((y * 64 + x) * 4) as usize;
+                    px[i] = (x * 4) as u8;
+                    px[i + 1] = (y * 5) as u8;
+                    px[i + 2] = 150;
+                    px[i + 3] = 255;
+                }
+            }
+        }
+        d.set_background_image(slint::Image::from_rgba8(bg));
+        let out = |x: f32, y: f32, w: f32, h: f32| OutputRect {
+            x,
+            y,
+            width: w,
+            height: h,
+        };
+        d.set_outputs(ModelRc::from(Rc::new(VecModel::from(if multi {
+            vec![out(0., 0., 1280., 800.), out(1280., 0., 1280., 800.)]
+        } else {
+            vec![out(0., 0., 1280., 800.)]
+        }))));
+
         if std::env::var("SCOMP_SHOT_SETTINGS").is_ok() {
             d.set_settings_visible(true);
             d.set_settings_tab(1);
@@ -2228,15 +2313,13 @@ mod shot {
             };
             rgba.extend_from_slice(&[u(p.red), u(p.green), u(p.blue), a]);
         }
-        image::save_buffer(
-            "/tmp/desktop-icons.png",
-            &rgba,
-            w,
-            h,
-            image::ExtendedColorType::Rgba8,
-        )
-        .unwrap();
-        eprintln!("wrote /tmp/desktop-icons.png");
+        let out_path = if multi {
+            "/tmp/multi-output.png"
+        } else {
+            "/tmp/desktop-icons.png"
+        };
+        image::save_buffer(out_path, &rgba, w, h, image::ExtendedColorType::Rgba8).unwrap();
+        eprintln!("wrote {out_path}");
         d.hide().unwrap();
     }
 }
