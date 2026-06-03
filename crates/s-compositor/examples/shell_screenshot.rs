@@ -137,8 +137,8 @@ fn main() {
         "shot_top_panel.png",
     );
 
-    // Snap preview (left half) — shown while dragging a window to an edge.
-    ui.set_snap_preview(1);
+    // Snap preview (top-right quarter) — shown while dragging a window to a corner.
+    ui.set_snap_preview(5);
     save(&ui, &window, PhysicalSize::new(1100, 720), "shot_snap.png");
     ui.set_snap_preview(0);
 

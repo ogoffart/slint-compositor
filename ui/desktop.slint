@@ -506,11 +506,14 @@ export component Desktop inherits Window {
     }
 
     // Snap preview: a translucent highlight of where a dragged window will land.
+    // Zones: 1=left 2=right 3=max 4=top-left 5=top-right 6=bottom-left 7=bottom-right.
     if root.snap-preview != 0: Rectangle {
-        x: root.snap-preview == 2 ? root.work-x + root.work-w / 2 : root.work-x;
-        y: root.work-y;
+        x: (root.snap-preview == 2 || root.snap-preview == 5 || root.snap-preview == 7)
+            ? root.work-x + root.work-w / 2 : root.work-x;
+        y: (root.snap-preview == 6 || root.snap-preview == 7)
+            ? root.work-y + root.work-h / 2 : root.work-y;
         width: root.snap-preview == 3 ? root.work-w : root.work-w / 2;
-        height: root.work-h;
+        height: root.snap-preview >= 4 ? root.work-h / 2 : root.work-h;
         border-radius: 8px;
         border-width: 2px;
         border-color: Theme.accent;
@@ -533,7 +536,11 @@ export component Desktop inherits Window {
             root.move-window(win.id, dx, dy);
         }
         dragging(cx, cy) => {
-            root.snap-preview = cy <= 16px ? 3 : cx <= 16px ? 1 : cx >= root.width - 16px ? 2 : 0;
+            root.snap-preview = cx <= 16px
+                ? (cy <= root.height * 0.33 ? 4 : cy >= root.height * 0.66 ? 6 : 1)
+                : cx >= root.width - 16px
+                    ? (cy <= root.height * 0.33 ? 5 : cy >= root.height * 0.66 ? 7 : 2)
+                    : cy <= 16px ? 3 : 0;
         }
         dropped(cx, cy) => {
             root.snap-preview = 0;

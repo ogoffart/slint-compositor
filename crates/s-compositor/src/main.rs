@@ -680,14 +680,30 @@ fn main() -> anyhow::Result<()> {
             let scale = d.window().scale_factor().max(0.01);
             let size = d.window().size();
             let sw = size.width as f32 / scale;
+            let sh = size.height as f32 / scale;
             let edge = 16.0;
             let id = id as u64;
-            if cy <= edge {
-                set_maximized(&d, &model, &windows, &cmd_tx, id, true);
-            } else if cx <= edge {
-                snap_window(&d, &model, &windows, &cmd_tx, id, Snap::Left);
+            // Corners snap to a quarter, left/right edges to a half, top edge maximizes.
+            if cx <= edge {
+                let snap = if cy <= sh * 0.33 {
+                    Snap::TopLeft
+                } else if cy >= sh * 0.66 {
+                    Snap::BottomLeft
+                } else {
+                    Snap::Left
+                };
+                snap_window(&d, &model, &windows, &cmd_tx, id, snap);
             } else if cx >= sw - edge {
-                snap_window(&d, &model, &windows, &cmd_tx, id, Snap::Right);
+                let snap = if cy <= sh * 0.33 {
+                    Snap::TopRight
+                } else if cy >= sh * 0.66 {
+                    Snap::BottomRight
+                } else {
+                    Snap::Right
+                };
+                snap_window(&d, &model, &windows, &cmd_tx, id, snap);
+            } else if cy <= edge {
+                set_maximized(&d, &model, &windows, &cmd_tx, id, true);
             }
         }
     });
@@ -1403,6 +1419,10 @@ enum Snap {
     Right,
     Up,
     Down,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
 }
 
 /// Snap the focused window to a half of the work area (keyboard tiling).
@@ -1441,6 +1461,10 @@ fn snap_window(
         Snap::Right => (wx + ww / 2.0, wy, ww / 2.0, wh),
         Snap::Up => (wx, wy, ww, wh / 2.0),
         Snap::Down => (wx, wy + wh / 2.0, ww, wh / 2.0),
+        Snap::TopLeft => (wx, wy, ww / 2.0, wh / 2.0),
+        Snap::TopRight => (wx + ww / 2.0, wy, ww / 2.0, wh / 2.0),
+        Snap::BottomLeft => (wx, wy + wh / 2.0, ww / 2.0, wh / 2.0),
+        Snap::BottomRight => (wx + ww / 2.0, wy + wh / 2.0, ww / 2.0, wh / 2.0),
     };
     let titlebar = if tile.decorated { 28.0 } else { 0.0 };
     tile.x = x;
