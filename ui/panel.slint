@@ -163,7 +163,17 @@ component WorkspaceSwitcher {
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
-            TouchArea { clicked => { root.switch(i); } }
+            TouchArea {
+                clicked => { root.switch(i); }
+                scroll-event(e) => {
+                    if e.delta-y < 0 && root.active < root.count - 1 {
+                        root.switch(root.active + 1);
+                    } else if e.delta-y >= 0 && root.active > 0 {
+                        root.switch(root.active - 1);
+                    }
+                    accept
+                }
+            }
         }
     }
 }
