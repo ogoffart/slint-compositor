@@ -1,14 +1,48 @@
-// Panel clock: shows the time stacked as "HH" over "MM".
-export component Clock inherits Rectangle {
-    in property <string> time;
-    height: label.preferred-height;
+// Panel clock. Shows the time as "HH:MM" on a single line when there is room,
+// and stacks the hours over the minutes only when the panel is too narrow.
+component TimeLabel inherits Text {
+    color: #cdd6f4;
+    font-size: 18px;
+    font-weight: 700;
+    horizontal-alignment: center;
+}
 
-    label := Text {
-        text: root.time;
-        color: #cdd6f4;
-        font-size: 18px;
-        font-weight: 700;
-        horizontal-alignment: center;
-        wrap: word-wrap;
+export component Clock inherits Rectangle {
+    in property <string> hours;
+    in property <string> minutes;
+
+    // Our reported size is driven by the (constant) one-line probe so that the
+    // `stacked` decision below can read `width` without forming a layout loop.
+    min-width: probe.preferred-width;
+    preferred-width: probe.preferred-width;
+    min-height: root.stacked ? probe.preferred-height * 2 : probe.preferred-height;
+    preferred-height: root.min-height;
+
+    // Stack the digits only when the panel is too narrow to fit one line.
+    property <bool> stacked: root.width < probe.preferred-width;
+
+    // Invisible: measures how wide the time is when drawn on a single line.
+    probe := TimeLabel {
+        text: root.hours + ":" + root.minutes;
+        visible: false;
+    }
+
+    TimeLabel {
+        text: root.hours + ":" + root.minutes;
+        visible: !root.stacked;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+    }
+    TimeLabel {
+        text: root.hours;
+        visible: root.stacked;
+        x: (root.width - self.width) / 2;
+        y: root.height / 2 - self.height;
+    }
+    TimeLabel {
+        text: root.minutes;
+        visible: root.stacked;
+        x: (root.width - self.width) / 2;
+        y: root.height / 2;
     }
 }

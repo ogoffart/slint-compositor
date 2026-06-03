@@ -18,6 +18,8 @@ component WindowFrame inherits Rectangle {
     visible: !tile.minimized;
     // pointer: surface-local x, y, kind (0=move,1=down,2=up), button (0..3)
     callback pointer(float, float, int, int);
+    // cursor-moved: pointer position in window coordinates (for the eyes applet)
+    callback cursor-moved(length, length);
     callback scroll(float, float);
     // key: text, pressed, ctrl, alt, shift
     callback key(string, bool, bool, bool, bool);
@@ -151,10 +153,12 @@ component WindowFrame inherits Rectangle {
                         root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 2, self.btn-code(e.button));
                     } else if e.kind == PointerEventKind.move {
                         root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
+                        root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
                     }
                 }
                 moved => {
                     root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
+                    root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
                 }
                 scroll-event(e) => {
                     root.scroll(e.delta-x / 1px, e.delta-y / 1px);
@@ -189,8 +193,12 @@ component WindowFrame inherits Rectangle {
 
 // Root scene: composited client windows + the right-edge panel.
 export component Desktop inherits Window {
-    in property <string> clock-time;
+    in property <string> clock-hours;
+    in property <string> clock-minutes;
     in property <[WindowTile]> windows;
+    // Latest pointer position in window coordinates, fed to the eyes applet.
+    property <length> cursor-x;
+    property <length> cursor-y;
     in property <image> background-image;
     in-out property <int> panel-edge: 0;        // 0=Right 1=Left 2=Top 3=Bottom
     in-out property <length> panel-size: 72px;
@@ -235,6 +243,23 @@ export component Desktop inherits Window {
         image-fit: cover;
     }
 
+    // Track the pointer over the empty desktop so the eyes keep following it
+    // even when it is not over a window. Sits beneath the windows and panel.
+    bg-pointer := TouchArea {
+        width: 100%;
+        height: 100%;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.move {
+                root.cursor-x = self.absolute-position.x + self.mouse-x;
+                root.cursor-y = self.absolute-position.y + self.mouse-y;
+            }
+        }
+        moved => {
+            root.cursor-x = self.absolute-position.x + self.mouse-x;
+            root.cursor-y = self.absolute-position.y + self.mouse-y;
+        }
+    }
+
     for win in root.windows: WindowFrame {
         tile: win;
         close => {
@@ -258,6 +283,10 @@ export component Desktop inherits Window {
         pointer(x, y, kind, btn) => {
             root.pointer-window(win.id, x, y, kind, btn);
         }
+        cursor-moved(cx, cy) => {
+            root.cursor-x = cx;
+            root.cursor-y = cy;
+        }
         scroll(dx, dy) => {
             root.scroll-window(win.id, dx, dy);
         }
@@ -267,7 +296,10 @@ export component Desktop inherits Window {
     }
 
     Panel {
-        clock-time: root.clock-time;
+        clock-hours: root.clock-hours;
+        clock-minutes: root.clock-minutes;
+        cursor-x: root.cursor-x;
+        cursor-y: root.cursor-y;
         windows: root.windows;
         horizontal: root.panel-edge >= 2;
         width: root.panel-edge >= 2 ? parent.width : root.panel-size;

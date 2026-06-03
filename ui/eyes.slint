@@ -1,0 +1,48 @@
+// A little xeyes-style applet: two big googly eyes whose pupils follow the
+// pointer. The cursor position is given in window coordinates; each eye uses
+// its own absolute position to work out which way to look.
+component Eye inherits Rectangle {
+    in property <length> cursor-x;
+    in property <length> cursor-y;
+
+    background: #f5f5f5;
+    // A large radius on a non-square rectangle gives an ellipse.
+    border-radius: min(self.width, self.height) / 2;
+    border-width: 2px;
+    border-color: #11111b;
+
+    // Vector from the eye's centre to the cursor, measured in pixels.
+    property <float> dx: (root.cursor-x - (self.absolute-position.x + self.width / 2)) / 1px;
+    property <float> dy: (root.cursor-y - (self.absolute-position.y + self.height / 2)) / 1px;
+    property <float> dist: max(sqrt(dx * dx + dy * dy), 0.001);
+
+    // How far the pupil may stray from the centre along each axis.
+    property <length> reach-x: (self.width - pupil.width) / 2 - 2px;
+    property <length> reach-y: (self.height - pupil.height) / 2 - 2px;
+
+    pupil := Rectangle {
+        width: parent.width * 0.4;
+        height: parent.height * 0.4;
+        background: #11111b;
+        border-radius: min(self.width, self.height) / 2;
+        // Sit on the rim in the direction of the cursor (unit vector * reach).
+        x: (parent.width - self.width) / 2 + root.dx / root.dist * root.reach-x;
+        y: (parent.height - self.height) / 2 + root.dy / root.dist * root.reach-y;
+    }
+}
+
+export component Eyes inherits Rectangle {
+    in property <length> cursor-x;
+    in property <length> cursor-y;
+
+    HorizontalLayout {
+        spacing: 4px;
+        alignment: center;
+        for i in 2: Eye {
+            cursor-x: root.cursor-x;
+            cursor-y: root.cursor-y;
+            preferred-width: 24px;
+            preferred-height: 30px;
+        }
+    }
+}

@@ -331,7 +331,9 @@ fn main() -> anyhow::Result<()> {
         let weak = desktop.as_weak();
         move || {
             if let Some(d) = weak.upgrade() {
-                d.set_clock_time(s_compositor_shell::format_clock(Local::now()).into());
+                let (hours, minutes) = s_compositor_shell::format_clock(Local::now());
+                d.set_clock_hours(hours.into());
+                d.set_clock_minutes(minutes.into());
             }
         }
     };
