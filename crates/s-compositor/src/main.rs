@@ -65,6 +65,28 @@ fn main() -> anyhow::Result<()> {
     let bg_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(loaded.background.clone()));
     apply_config(&desktop, &loaded);
 
+    // Start-menu apps: use the configured list, or auto-discover defaults.
+    let menu_apps: Rc<Vec<config::AppEntry>> = Rc::new(if loaded.menu.is_empty() {
+        config::discover_default_apps()
+    } else {
+        loaded.menu.clone()
+    });
+    desktop.set_menu_entries(ModelRc::from(Rc::new(VecModel::from(
+        menu_apps
+            .iter()
+            .map(|a| MenuEntry {
+                icon: a.icon.clone().into(),
+                name: a.name.clone().into(),
+                command: a.command.clone().into(),
+                kind: "app".into(),
+            })
+            .collect::<Vec<_>>(),
+    ))));
+
+    // Lock-screen password (empty = unlock on Enter).
+    let lock_password: Rc<RefCell<String>> = Rc::new(RefCell::new(loaded.lock_password.clone()));
+    desktop.set_lock_has_password(!lock_password.borrow().is_empty());
+
     let model = Rc::new(VecModel::<WindowTile>::default());
     desktop.set_windows(ModelRc::from(model.clone()));
     let popups_model = Rc::new(VecModel::<PopupTile>::default());
@@ -163,9 +185,13 @@ fn main() -> anyhow::Result<()> {
         let file_dialog = file_dialog.clone();
         let weak = desktop.as_weak();
         let bg_path = bg_path.clone();
+        let menu_apps = menu_apps.clone();
+        let lock_password = lock_password.clone();
         move || {
             let weak = weak.clone();
             let bg_path = bg_path.clone();
+            let menu_apps = menu_apps.clone();
+            let lock_password = lock_password.clone();
             file_dialog.borrow_mut().open(
                 "Select background image",
                 file_dialog::home_dir(),
@@ -176,7 +202,7 @@ fn main() -> anyhow::Result<()> {
                             Ok(image) => {
                                 d.set_background_image(image);
                                 *bg_path.borrow_mut() = Some(path.to_string_lossy().into_owned());
-                                current_config(&d, &bg_path).save();
+                                current_config(&d, &bg_path, &menu_apps, &lock_password).save();
                             }
                             Err(err) => log::error!("failed to load image {path:?}: {err}"),
                         }
@@ -191,9 +217,11 @@ fn main() -> anyhow::Result<()> {
         let weak = desktop.as_weak();
         let bg_path = bg_path.clone();
         let appearance_tx = appearance_tx.clone();
+        let menu_apps = menu_apps.clone();
+        let lock_password = lock_password.clone();
         move || {
             if let Some(d) = weak.upgrade() {
-                current_config(&d, &bg_path).save();
+                current_config(&d, &bg_path, &menu_apps, &lock_password).save();
                 let _ = appearance_tx.try_send(current_appearance(&d));
             }
         }
@@ -299,6 +327,29 @@ fn main() -> anyhow::Result<()> {
             let env = wayland_env.borrow();
             let env = env.as_ref().map(|(d, r)| (d.as_str(), r.as_str()));
             spawn_command(cmd.as_str(), env);
+        }
+    });
+
+    // Start menu: log out quits the compositor.
+    desktop.on_logout(|| {
+        log::info!("logout requested; quitting");
+        let _ = slint::quit_event_loop();
+    });
+
+    // Lock screen: unlock when the typed password matches (or none is set).
+    desktop.on_unlock({
+        let weak = desktop.as_weak();
+        let lock_password = lock_password.clone();
+        move |entered| {
+            let Some(d) = weak.upgrade() else {
+                return;
+            };
+            if entered.as_str() == lock_password.borrow().as_str() {
+                d.set_lock_wrong(false);
+                d.set_locked(false);
+            } else {
+                d.set_lock_wrong(true);
+            }
         }
     });
 
@@ -795,8 +846,14 @@ fn apply_config(d: &Desktop, c: &config::Config) {
     }
 }
 
-/// Read the current settings out of the UI.
-fn current_config(d: &Desktop, bg: &Rc<RefCell<Option<String>>>) -> config::Config {
+/// Read the current settings out of the UI, carrying over the non-UI bits
+/// (start-menu apps and lock password) so saving doesn't drop them.
+fn current_config(
+    d: &Desktop,
+    bg: &Rc<RefCell<Option<String>>>,
+    menu: &Rc<Vec<config::AppEntry>>,
+    lock_password: &Rc<RefCell<String>>,
+) -> config::Config {
     let theme = d.global::<Theme>();
     config::Config {
         dark: theme.get_dark(),
@@ -804,6 +861,8 @@ fn current_config(d: &Desktop, bg: &Rc<RefCell<Option<String>>>) -> config::Conf
         panel_edge: d.get_panel_edge(),
         panel_size: d.get_panel_size(),
         background: bg.borrow().clone(),
+        menu: (**menu).clone(),
+        lock_password: lock_password.borrow().clone(),
     }
 }
 

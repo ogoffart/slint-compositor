@@ -1,0 +1,56 @@
+import { Theme } from "theme.slint";
+import { LineEdit } from "std-widgets.slint";
+
+// A simple lock screen overlay. Covers everything and grabs the keyboard; the
+// typed password is sent to the host which decides whether to unlock. This is a
+// shell-level lock, not a PAM-backed one.
+export component LockScreen inherits Rectangle {
+    in property <string> clock-hours;
+    in property <string> clock-minutes;
+    in property <bool> has-password;
+    in property <bool> wrong;
+    callback unlock(string);
+
+    background: #0a0a0f;
+
+    // Eat all clicks.
+    TouchArea {}
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 18px;
+
+        Text {
+            text: root.clock-hours + ":" + root.clock-minutes;
+            color: white;
+            font-size: 72px;
+            font-weight: 200;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.wrong ? "Wrong password" : "Locked";
+            color: root.wrong ? #f38ba8 : Theme.subtext;
+            font-size: 14px;
+            horizontal-alignment: center;
+        }
+
+        HorizontalLayout {
+            alignment: center;
+            input := LineEdit {
+                width: 280px;
+                font-size: 16px;
+                input-type: password;
+                placeholder-text: root.has-password ? "Password" : "Press Enter to unlock";
+                accepted(text) => {
+                    root.unlock(text);
+                    self.text = "";
+                }
+            }
+        }
+    }
+
+    init => {
+        input.focus();
+    }
+}

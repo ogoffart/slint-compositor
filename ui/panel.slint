@@ -92,7 +92,7 @@ export component Panel inherits Rectangle {
     in property <int> active-workspace;
     in property <int> workspace-count: 4;
     in property <length> thickness;   // panel size along its short axis
-    callback toggle-launcher();
+    callback toggle-start-menu();
     callback toggle-settings();
     callback activate(int);
     callback switch-workspace(int);
@@ -103,10 +103,10 @@ export component Panel inherits Rectangle {
         padding: 8px;
         spacing: 10px;
         PanelButton {
-            icon: "▶";
+            icon: "⊞";
             icon-color: Theme.accent;
             height: 40px;
-            clicked => { root.toggle-launcher(); }
+            clicked => { root.toggle-start-menu(); }
         }
         PanelButton {
             icon: "⚙";
@@ -142,10 +142,10 @@ export component Panel inherits Rectangle {
         padding: 8px;
         spacing: 10px;
         PanelButton {
-            icon: "▶";
+            icon: "⊞";
             icon-color: Theme.accent;
             width: 40px;
-            clicked => { root.toggle-launcher(); }
+            clicked => { root.toggle-start-menu(); }
         }
         PanelButton {
             icon: "⚙";

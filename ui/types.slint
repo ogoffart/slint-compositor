@@ -26,6 +26,15 @@ export struct FileItem {
     is-dir: bool,
 }
 
+// A start-menu application entry. `kind`: "app" launches `command`, "run" opens
+// the run dialog, "lock" locks the screen, "logout" quits the compositor.
+export struct MenuEntry {
+    name: string,
+    command: string,
+    icon: string,
+    kind: string,
+}
+
 // A composited client window: its current frame, title, geometry and state.
 export struct WindowTile {
     id: int,

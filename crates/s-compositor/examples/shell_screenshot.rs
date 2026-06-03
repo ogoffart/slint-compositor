@@ -115,4 +115,43 @@ fn main() {
         PhysicalSize::new(1100, 720),
         "shot_settings.png",
     );
+    ui.set_settings_visible(false);
+
+    // 4. Start menu with some apps and the power actions.
+    ui.set_panel_edge(0);
+    ui.set_panel_size(72.0);
+    let menu = Rc::new(slint::VecModel::from(vec![
+        MenuEntry {
+            icon: "🌐".into(),
+            name: "Firefox".into(),
+            command: "firefox".into(),
+            kind: "app".into(),
+        },
+        MenuEntry {
+            icon: "🖥".into(),
+            name: "Terminal".into(),
+            command: "foot".into(),
+            kind: "app".into(),
+        },
+        MenuEntry {
+            icon: "🎮".into(),
+            name: "SuperTuxKart".into(),
+            command: "supertuxkart".into(),
+            kind: "app".into(),
+        },
+    ]));
+    ui.set_menu_entries(menu.into());
+    ui.set_start_menu_visible(true);
+    save(
+        &ui,
+        &window,
+        PhysicalSize::new(1100, 720),
+        "shot_start_menu.png",
+    );
+    ui.set_start_menu_visible(false);
+
+    // 5. Lock screen.
+    ui.set_lock_has_password(true);
+    ui.set_locked(true);
+    save(&ui, &window, PhysicalSize::new(1100, 720), "shot_lock.png");
 }

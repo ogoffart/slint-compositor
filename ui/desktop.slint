@@ -1,10 +1,12 @@
 import { Theme } from "theme.slint";
 import { Panel } from "panel.slint";
 import { Launcher } from "launcher.slint";
+import { StartMenu } from "start_menu.slint";
+import { LockScreen } from "lock_screen.slint";
 import { Settings } from "settings.slint";
 import { FileDialog } from "file_dialog.slint";
-import { WindowTile, FileItem, PopupTile, LayerTile } from "types.slint";
-export { WindowTile, FileItem, PopupTile, LayerTile }
+import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry } from "types.slint";
+export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry }
 export { Theme }
 
 // Server-side decoration + input routing for one client window.
@@ -223,6 +225,15 @@ export component Desktop inherits Window {
     in property <int> workspace-count: 4;
     in-out property <bool> launcher-visible: false;
     in-out property <bool> settings-visible: false;
+    in-out property <bool> start-menu-visible: false;
+
+    // Start menu + lock screen.
+    in property <[MenuEntry]> menu-entries;
+    in-out property <bool> locked: false;
+    in property <bool> lock-has-password;
+    in-out property <bool> lock-wrong: false;
+    callback logout();
+    callback unlock(string);
 
     // File dialog state (driven from Rust).
     in-out property <bool> file-dialog-visible: false;
@@ -379,8 +390,8 @@ export component Desktop inherits Window {
         height: root.panel-edge >= 2 ? root.panel-size : parent.height;
         x: root.panel-edge == 0 ? parent.width - root.panel-size : 0px;
         y: root.panel-edge == 3 ? parent.height - root.panel-size : 0px;
-        toggle-launcher => {
-            root.launcher-visible = !root.launcher-visible;
+        toggle-start-menu => {
+            root.start-menu-visible = !root.start-menu-visible;
         }
         toggle-settings => {
             root.settings-visible = !root.settings-visible;
@@ -435,6 +446,47 @@ export component Desktop inherits Window {
         }
         dismiss => {
             root.launcher-visible = false;
+        }
+    }
+
+    if root.start-menu-visible: StartMenu {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        entries: root.menu-entries;
+        launch(cmd) => {
+            root.launch(cmd);
+            root.start-menu-visible = false;
+        }
+        run => {
+            root.start-menu-visible = false;
+            root.launcher-visible = true;
+        }
+        lock => {
+            root.start-menu-visible = false;
+            root.lock-wrong = false;
+            root.locked = true;
+        }
+        logout => {
+            root.logout();
+        }
+        dismiss => {
+            root.start-menu-visible = false;
+        }
+    }
+
+    if root.locked: LockScreen {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        clock-hours: root.clock-hours;
+        clock-minutes: root.clock-minutes;
+        has-password: root.lock-has-password;
+        wrong: root.lock-wrong;
+        unlock(pw) => {
+            root.unlock(pw);
         }
     }
 
