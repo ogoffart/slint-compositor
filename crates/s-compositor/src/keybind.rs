@@ -30,6 +30,7 @@ pub enum Action {
     SnapUp,
     SnapDown,
     Maximize,
+    Screenshot,
 }
 
 /// A modifier combination plus a (normalized) key, bound to an action.
@@ -187,6 +188,7 @@ fn parse_action(s: &str) -> Option<Action> {
         "snap-up" => Action::SnapUp,
         "snap-down" => Action::SnapDown,
         "maximize" => Action::Maximize,
+        "screenshot" => Action::Screenshot,
         _ => return None,
     })
 }
@@ -215,6 +217,7 @@ fn action_to_string(action: &Action) -> String {
         Action::SnapUp => "snap-up".into(),
         Action::SnapDown => "snap-down".into(),
         Action::Maximize => "maximize".into(),
+        Action::Screenshot => "screenshot".into(),
     }
 }
 
@@ -237,6 +240,7 @@ pub fn defaults() -> Vec<Keybind> {
         "Super+Right = snap-right",
         "Super+Up = maximize",
         "Super+Down = snap-down",
+        "Super+p = screenshot",
     ]
     .into_iter()
     .filter_map(parse)

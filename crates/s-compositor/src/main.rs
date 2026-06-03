@@ -546,6 +546,8 @@ fn main() -> anyhow::Result<()> {
         let windows = windows.clone();
         let wayland_env = wayland_env.clone();
         let vol_tx = vol_cmd_tx.clone();
+        let notif_model = notif_model.clone();
+        let notif_expiry = notif_expiry.clone();
         Rc::new(move |text: &str, ctrl, alt, shift, meta| {
             let key = keybind::normalize_text(text);
             let Some(bind) = keybinds
@@ -563,6 +565,8 @@ fn main() -> anyhow::Result<()> {
                     &windows,
                     &wayland_env,
                     &vol_tx,
+                    &notif_model,
+                    &notif_expiry,
                 );
             }
             true
@@ -1097,6 +1101,8 @@ fn run_action(
     windows: &Rc<RefCell<Windows>>,
     wayland_env: &Rc<RefCell<Option<(String, String)>>>,
     vol_tx: &Option<std::sync::mpsc::Sender<volume::VolCommand>>,
+    notif_model: &Rc<VecModel<Notification>>,
+    notif_expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
 ) {
     use keybind::Action;
     let workspaces = WORKSPACES as i32;
@@ -1170,7 +1176,76 @@ fn run_action(
                 set_maximized(d, model, windows, cmd_tx, id, !maxed);
             }
         }
+        Action::Screenshot => take_screenshot(d, notif_model, notif_expiry),
     }
+}
+
+/// Capture the whole screen to a PNG in the user's Pictures directory and show a
+/// notification with the path.
+fn take_screenshot(
+    d: &Desktop,
+    notif_model: &Rc<VecModel<Notification>>,
+    notif_expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
+) {
+    let buffer = match d.window().take_snapshot() {
+        Ok(b) => b,
+        Err(err) => {
+            log::warn!("screenshot: take_snapshot failed: {err}");
+            return;
+        }
+    };
+    let dir = {
+        let pics = file_dialog::home_dir().join("Pictures");
+        if pics.is_dir() {
+            pics
+        } else {
+            file_dialog::home_dir()
+        }
+    };
+    let name = format!("Screenshot-{}.png", Local::now().format("%Y%m%d-%H%M%S"));
+    let path = dir.join(&name);
+    match image::save_buffer(
+        &path,
+        buffer.as_bytes(),
+        buffer.width(),
+        buffer.height(),
+        image::ColorType::Rgba8,
+    ) {
+        Ok(()) => {
+            log::info!("screenshot saved to {}", path.display());
+            notify_internal(
+                notif_model,
+                notif_expiry,
+                "Screenshot",
+                &format!("Saved {name}"),
+            );
+        }
+        Err(err) => log::warn!("screenshot: save failed: {err}"),
+    }
+}
+
+/// Push a shell-internal notification (e.g. screenshot saved).
+fn notify_internal(
+    model: &Rc<VecModel<Notification>>,
+    expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
+    summary: &str,
+    body: &str,
+) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(1_000_000_000);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    apply_notify_event(
+        notify::NotifyEvent::Add {
+            id,
+            app_name: "s-compositor".to_string(),
+            summary: summary.to_string(),
+            body: body.to_string(),
+            icon: String::new(),
+            timeout_ms: -1,
+        },
+        model,
+        expiry,
+    );
 }
 
 /// Apply persisted settings to the UI.

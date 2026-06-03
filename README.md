@@ -93,8 +93,9 @@ Actions: `spawn:<cmd>`, `start-menu`, `launcher`, `settings`, `quick-settings`,
 `lock`, `logout`, `close-window`, `next-window`, `prev-window`, `workspace:<n>`,
 `move-to-workspace:<n>`, `workspace-next`, `workspace-prev`, `volume-up`,
 `volume-down`, `volume-mute`, `snap-left`, `snap-right`, `snap-up`, `snap-down`,
-`maximize`. With no `bind` lines, sensible defaults are used (including
-`Super`+arrows to tile/maximize the focused window).
+`maximize`, `screenshot`. With no `bind` lines, sensible defaults are used
+(including `Super`+arrows to tile/maximize the focused window and `Super+p` to
+screenshot to `~/Pictures`).
 
 ## File chooser portal
 
