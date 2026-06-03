@@ -40,6 +40,8 @@ struct Windows {
     restore: HashMap<u64, (f32, f32, f32, f32)>,
     /// popup id -> row index in the popups model.
     popup_rows: HashMap<u64, usize>,
+    /// layer-surface id -> row index in the layers model.
+    layer_rows: HashMap<u64, usize>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -67,6 +69,8 @@ fn main() -> anyhow::Result<()> {
     desktop.set_windows(ModelRc::from(model.clone()));
     let popups_model = Rc::new(VecModel::<PopupTile>::default());
     desktop.set_popups(ModelRc::from(popups_model.clone()));
+    let layers_model = Rc::new(VecModel::<LayerTile>::default());
+    desktop.set_layers(ModelRc::from(layers_model.clone()));
     let windows = Rc::new(RefCell::new(Windows::default()));
     let bridge = Rc::new(RefCell::new(GlBridge::default()));
     // (WAYLAND_DISPLAY, XDG_RUNTIME_DIR) of s-compositor's compositor, learned from Ready.
@@ -81,6 +85,7 @@ fn main() -> anyhow::Result<()> {
             let windows = windows.clone();
             let model = model.clone();
             let popups_model = popups_model.clone();
+            let layers_model = layers_model.clone();
             move |state, graphics_api| match state {
                 slint::RenderingState::RenderingSetup => {
                     if let slint::GraphicsAPI::NativeOpenGL { get_proc_address } = graphics_api {
@@ -114,6 +119,13 @@ fn main() -> anyhow::Result<()> {
                                 tile.width = frame.width as f32;
                                 tile.height = frame.height as f32;
                                 popups_model.set_row_data(row, tile);
+                            }
+                        } else if let Some(&row) = windows.layer_rows.get(&id) {
+                            if let Some(mut tile) = layers_model.row_data(row) {
+                                tile.texture = image;
+                                tile.width = frame.width as f32;
+                                tile.height = frame.height as f32;
+                                layers_model.set_row_data(row, tile);
                             }
                         }
                     }
@@ -444,6 +456,7 @@ fn main() -> anyhow::Result<()> {
         let windows = windows.clone();
         let model = model.clone();
         let popups_model = popups_model.clone();
+        let layers_model = layers_model.clone();
         let wayland_env = wayland_env.clone();
         let file_dialog = file_dialog.clone();
         move || {
@@ -457,6 +470,7 @@ fn main() -> anyhow::Result<()> {
                     event,
                     &model,
                     &popups_model,
+                    &layers_model,
                     &windows,
                     &wayland_env,
                     active_ws,
@@ -487,10 +501,12 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Apply a compositor event. Returns true if a redraw is needed.
+#[allow(clippy::too_many_arguments)]
 fn handle_event(
     event: s_compositor_wayland::Event,
     model: &Rc<VecModel<WindowTile>>,
     popups_model: &Rc<VecModel<PopupTile>>,
+    layers_model: &Rc<VecModel<LayerTile>>,
     windows: &Rc<RefCell<Windows>>,
     wayland_env: &Rc<RefCell<Option<(String, String)>>>,
     active_workspace: i32,
@@ -623,6 +639,61 @@ fn handle_event(
             if let Some(removed) = windows.popup_rows.remove(&id.0) {
                 popups_model.remove(removed);
                 for row in windows.popup_rows.values_mut() {
+                    if *row > removed {
+                        *row -= 1;
+                    }
+                }
+                windows.closed.push(id.0);
+            }
+            true
+        }
+        Event::LayerBuffer {
+            id,
+            layer,
+            x,
+            y,
+            width,
+            height,
+            pixels,
+        } => {
+            let mut windows = windows.borrow_mut();
+            if let Some(&row) = windows.layer_rows.get(&id.0) {
+                if let Some(mut tile) = layers_model.row_data(row) {
+                    tile.x = x as f32;
+                    tile.y = y as f32;
+                    tile.width = width as f32;
+                    tile.height = height as f32;
+                    layers_model.set_row_data(row, tile);
+                }
+            } else {
+                let row = layers_model.row_count();
+                layers_model.push(LayerTile {
+                    id: id.0 as i32,
+                    texture: slint::Image::default(),
+                    layer: layer as i32,
+                    x: x as f32,
+                    y: y as f32,
+                    width: width as f32,
+                    height: height as f32,
+                });
+                windows.layer_rows.insert(id.0, row);
+            }
+            windows.pending.insert(
+                id.0,
+                Frame {
+                    width,
+                    height,
+                    pixels,
+                },
+            );
+            true
+        }
+        Event::LayerRemoved(id) => {
+            let mut windows = windows.borrow_mut();
+            windows.pending.remove(&id.0);
+            if let Some(removed) = windows.layer_rows.remove(&id.0) {
+                layers_model.remove(removed);
+                for row in windows.layer_rows.values_mut() {
                     if *row > removed {
                         *row -= 1;
                     }

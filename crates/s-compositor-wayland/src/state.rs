@@ -14,6 +14,7 @@ use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::wlr_layer::{Layer, LayerSurface, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
@@ -31,6 +32,7 @@ pub struct SlickState {
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_decoration_state: XdgDecorationState,
+    pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<SlickState>,
@@ -46,6 +48,9 @@ pub struct SlickState {
 
     /// Mapped popups (menus etc.), keyed by their `wl_surface`.
     pub popups: HashMap<WlSurface, PopupEntry>,
+
+    /// Mapped layer-shell surfaces (bars, wallpapers), keyed by `wl_surface`.
+    pub layer_surfaces: HashMap<WlSurface, LayerEntry>,
 
     /// Start of the compositor, used to timestamp `wl_callback.done`.
     pub start_time: Instant,
@@ -65,6 +70,13 @@ pub struct WindowEntry {
     /// Whether s-compositor draws server-side decorations for this window. False when
     /// the client requested client-side decorations via xdg-decoration.
     pub decorated: bool,
+}
+
+/// A tracked layer-shell surface (panel, bar, wallpaper, notification).
+pub struct LayerEntry {
+    pub id: WindowId,
+    pub surface: LayerSurface,
+    pub layer: Layer,
 }
 
 /// A tracked popup (menu, dropdown, tooltip).
@@ -101,6 +113,12 @@ impl SlickState {
                     .values()
                     .find(|e| e.id == id)
                     .map(|e| e.popup.wl_surface().clone())
+            })
+            .or_else(|| {
+                self.layer_surfaces
+                    .values()
+                    .find(|e| e.id == id)
+                    .map(|e| e.surface.wl_surface().clone())
             })
     }
 
