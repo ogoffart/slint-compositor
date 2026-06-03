@@ -45,6 +45,7 @@ impl SlickState {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
+        self.set_selection_focus(&surface);
         keyboard.set_focus(self, Some(surface), serial);
     }
 
@@ -81,8 +82,9 @@ impl SlickState {
         let serial = SERIAL_COUNTER.next_serial();
         let time = self.millis_since_start();
 
-        // Clicking a window also gives it keyboard focus.
+        // Clicking a window also gives it keyboard and selection focus.
         if pressed {
+            self.set_selection_focus(&surface);
             if let Some(keyboard) = self.seat.get_keyboard() {
                 keyboard.set_focus(self, Some(surface), serial);
             }

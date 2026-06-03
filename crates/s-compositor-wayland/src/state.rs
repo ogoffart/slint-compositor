@@ -14,6 +14,7 @@ use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::shell::wlr_layer::{Layer, LayerSurface, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface, XdgShellState};
@@ -37,6 +38,7 @@ pub struct SlickState {
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<SlickState>,
     pub data_device_state: DataDeviceState,
+    pub primary_selection_state: PrimarySelectionState,
     pub seat: Seat<SlickState>,
     pub output: Output,
 
@@ -120,6 +122,23 @@ impl SlickState {
                     .find(|e| e.id == id)
                     .map(|e| e.surface.wl_surface().clone())
             })
+    }
+
+    /// Offer the clipboard and primary selection to the client owning `surface`
+    /// (called when keyboard focus changes, so copy/paste works).
+    pub fn set_selection_focus(&self, surface: &WlSurface) {
+        use smithay::reexports::wayland_server::Resource;
+        let client = surface.client();
+        smithay::wayland::selection::data_device::set_data_device_focus(
+            &self.display_handle,
+            &self.seat,
+            client.clone(),
+        );
+        smithay::wayland::selection::primary_selection::set_primary_focus(
+            &self.display_handle,
+            &self.seat,
+            client,
+        );
     }
 
     /// The window/popup id owning a surface (to resolve a popup's parent).

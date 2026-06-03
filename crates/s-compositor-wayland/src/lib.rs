@@ -230,6 +230,10 @@ pub fn run(
     let output_manager_state = OutputManagerState::new_with_xdg_output::<SlickState>(&dh);
     let mut seat_state = SeatState::<SlickState>::new();
     let data_device_state = DataDeviceState::new::<SlickState>(&dh);
+    let primary_selection_state =
+        smithay::wayland::selection::primary_selection::PrimarySelectionState::new::<SlickState>(
+            &dh,
+        );
 
     let mut seat = seat_state.new_wl_seat(&dh, "seat0");
     seat.add_keyboard(Default::default(), 200, 25)
@@ -266,6 +270,7 @@ pub fn run(
         output_manager_state,
         seat_state,
         data_device_state,
+        primary_selection_state,
         seat,
         output,
         workspaces: Workspaces::new(WORKSPACE_COUNT),
