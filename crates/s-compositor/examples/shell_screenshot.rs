@@ -211,6 +211,9 @@ fn main() {
         .into(),
     );
     ui.set_volume(65.0);
+    ui.set_battery_present(true);
+    ui.set_battery_percent(72.0);
+    ui.set_battery_charging(true);
     ui.set_wifi_enabled(true);
     ui.set_wifi_networks(
         Rc::new(slint::VecModel::from(vec![

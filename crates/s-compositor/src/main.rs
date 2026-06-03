@@ -22,6 +22,7 @@ mod keybind;
 mod network;
 mod notify;
 mod portal;
+mod power;
 mod session;
 mod volume;
 use gl_bridge::{Frame, GlBridge};
@@ -421,6 +422,9 @@ fn main() -> anyhow::Result<()> {
         move |id| remove_notification(&notif_model, &notif_expiry, id as u32)
     });
 
+    // Battery status via UPower.
+    let battery_rx = power::spawn();
+
     // Lock screen: unlock when the typed password matches (or none is set).
     desktop.on_unlock({
         let weak = desktop.as_weak();
@@ -690,6 +694,18 @@ fn main() -> anyhow::Result<()> {
                     if let Some(d) = weak.upgrade() {
                         d.set_volume(event.volume);
                         d.set_muted(event.muted);
+                        dirty = true;
+                    }
+                }
+            }
+
+            // Drain battery updates.
+            if let Some(rx) = &battery_rx {
+                while let Ok(b) = rx.try_recv() {
+                    if let Some(d) = weak.upgrade() {
+                        d.set_battery_present(b.present);
+                        d.set_battery_percent(b.percent as f32);
+                        d.set_battery_charging(b.charging);
                         dirty = true;
                     }
                 }

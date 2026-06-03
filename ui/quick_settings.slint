@@ -8,6 +8,9 @@ import { WifiNetwork } from "types.slint";
 export component QuickSettings inherits Rectangle {
     in property <float> volume;            // 0..100
     in property <bool> muted;
+    in property <bool> battery-present;
+    in property <float> battery-percent;
+    in property <bool> battery-charging;
     in property <bool> wifi-enabled;
     in property <[WifiNetwork]> networks;
     in-out property <string> password-ssid;  // ssid awaiting a password ("" = none)
@@ -41,6 +44,29 @@ export component QuickSettings inherits Rectangle {
         box := VerticalLayout {
             padding: 14px;
             spacing: 10px;
+
+            if root.battery-present: HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.battery-charging ? "🔌" : "🔋";
+                    font-size: 15px;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "Battery";
+                    color: Theme.subtext;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: "\{round(root.battery-percent)}%" + (root.battery-charging ? " ⚡" : "");
+                    color: Theme.fg;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
 
             Text {
                 text: "Volume";

@@ -241,6 +241,9 @@ export component Desktop inherits Window {
     in property <[TrayIcon]> tray-icons;
     in property <float> volume;
     in property <bool> muted;
+    in property <bool> battery-present;
+    in property <float> battery-percent;
+    in property <bool> battery-charging;
     in property <bool> wifi-enabled;
     in property <[WifiNetwork]> wifi-networks;
     callback set-volume(float);
@@ -572,6 +575,9 @@ export component Desktop inherits Window {
         height: parent.height;
         volume: root.volume;
         muted: root.muted;
+        battery-present: root.battery-present;
+        battery-percent: root.battery-percent;
+        battery-charging: root.battery-charging;
         wifi-enabled: root.wifi-enabled;
         networks: root.wifi-networks;
         set-volume(v) => {
