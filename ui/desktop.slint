@@ -275,6 +275,8 @@ export component Desktop inherits Window {
     callback pointer-window(int, float, float, int, int);
     callback scroll-window(int, float, float);
     callback key-window(int, string, bool, bool, bool, bool, bool);
+    // Global shortcut keys when no client is focused: text, pressed, ctrl, alt, shift, meta.
+    callback key-shortcut(string, bool, bool, bool, bool, bool);
     callback change-background();
     callback fd-entry-clicked(int);
     callback fd-go-up();
@@ -290,6 +292,21 @@ export component Desktop inherits Window {
     preferred-height: 800px;
     title: "s-compositor";
     background: Theme.bg;
+    forward-focus: shortcut-keys;
+
+    // Catches global shortcut keys whenever no client window holds focus.
+    shortcut-keys := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(e) => {
+            root.key-shortcut(e.text, true, e.modifiers.control, e.modifiers.alt, e.modifiers.shift, e.modifiers.meta);
+            accept
+        }
+        key-released(e) => {
+            root.key-shortcut(e.text, false, e.modifiers.control, e.modifiers.alt, e.modifiers.shift, e.modifiers.meta);
+            accept
+        }
+    }
 
     // Desktop background image (behind everything).
     Image {

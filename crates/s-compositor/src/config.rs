@@ -26,6 +26,8 @@ pub struct Config {
     pub menu: Vec<AppEntry>,
     /// Lock-screen password; empty means the lock unlocks on Enter.
     pub lock_password: String,
+    /// Global keyboard shortcuts. When empty, the defaults are used at startup.
+    pub keybinds: Vec<crate::keybind::Keybind>,
 }
 
 impl Default for Config {
@@ -38,6 +40,7 @@ impl Default for Config {
             background: None,
             menu: Vec::new(),
             lock_password: String::new(),
+            keybinds: Vec::new(),
         }
     }
 }
@@ -187,6 +190,10 @@ impl Config {
                 app.icon, app.name, app.command
             ));
         }
+        // Keyboard shortcuts: `bind = <combo> = <action>`.
+        for bind in &self.keybinds {
+            text.push_str(&format!("bind = {}\n", bind.to_config_string()));
+        }
         text
     }
 
@@ -221,6 +228,11 @@ impl Config {
                     self.background = (!value.is_empty()).then(|| value.to_string());
                 }
                 "lock_password" => self.lock_password = value.to_string(),
+                "bind" => {
+                    if let Some(b) = crate::keybind::parse(value) {
+                        self.keybinds.push(b);
+                    }
+                }
                 "app" => {
                     let mut parts = value.splitn(3, '|').map(|p| p.trim().to_string());
                     if let (Some(icon), Some(name), Some(command)) =
@@ -265,6 +277,10 @@ mod tests {
                     name: "Terminal".to_string(),
                     command: "foot".to_string(),
                 },
+            ],
+            keybinds: vec![
+                crate::keybind::parse("Super+d = start-menu").unwrap(),
+                crate::keybind::parse("Super+Equal = volume-up").unwrap(),
             ],
         };
         let mut parsed = Config::default();

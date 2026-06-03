@@ -17,6 +17,7 @@ mod config;
 mod file_dialog;
 mod gl_bridge;
 mod icons;
+mod keybind;
 mod network;
 mod portal;
 mod volume;
@@ -89,6 +90,13 @@ fn main() -> anyhow::Result<()> {
     // Lock-screen password (empty = unlock on Enter).
     let lock_password: Rc<RefCell<String>> = Rc::new(RefCell::new(loaded.lock_password.clone()));
     desktop.set_lock_has_password(!lock_password.borrow().is_empty());
+
+    // Global keyboard shortcuts: configured bindings, or the defaults.
+    let keybinds: Rc<Vec<keybind::Keybind>> = Rc::new(if loaded.keybinds.is_empty() {
+        keybind::defaults()
+    } else {
+        loaded.keybinds.clone()
+    });
 
     let model = Rc::new(VecModel::<WindowTile>::default());
     desktop.set_windows(ModelRc::from(model.clone()));
@@ -191,11 +199,13 @@ fn main() -> anyhow::Result<()> {
         let bg_path = bg_path.clone();
         let menu_apps = menu_apps.clone();
         let lock_password = lock_password.clone();
+        let keybinds = keybinds.clone();
         move || {
             let weak = weak.clone();
             let bg_path = bg_path.clone();
             let menu_apps = menu_apps.clone();
             let lock_password = lock_password.clone();
+            let keybinds = keybinds.clone();
             file_dialog.borrow_mut().open(
                 "Select background image",
                 file_dialog::home_dir(),
@@ -206,7 +216,8 @@ fn main() -> anyhow::Result<()> {
                             Ok(image) => {
                                 d.set_background_image(image);
                                 *bg_path.borrow_mut() = Some(path.to_string_lossy().into_owned());
-                                current_config(&d, &bg_path, &menu_apps, &lock_password).save();
+                                current_config(&d, &bg_path, &menu_apps, &lock_password, &keybinds)
+                                    .save();
                             }
                             Err(err) => log::error!("failed to load image {path:?}: {err}"),
                         }
@@ -223,9 +234,10 @@ fn main() -> anyhow::Result<()> {
         let appearance_tx = appearance_tx.clone();
         let menu_apps = menu_apps.clone();
         let lock_password = lock_password.clone();
+        let keybinds = keybinds.clone();
         move || {
             if let Some(d) = weak.upgrade() {
-                current_config(&d, &bg_path, &menu_apps, &lock_password).save();
+                current_config(&d, &bg_path, &menu_apps, &lock_password, &keybinds).save();
                 let _ = appearance_tx.try_send(current_appearance(&d));
             }
         }
@@ -507,31 +519,57 @@ fn main() -> anyhow::Result<()> {
     });
 
     // Keyboard: forward each press as a (modifier-wrapped) key tap.
-    desktop.on_key_window({
+    // Returns true if the key event matched a shortcut (and was consumed).
+    let run_binding: Rc<dyn Fn(&str, bool, bool, bool, bool) -> bool> = {
+        let keybinds = keybinds.clone();
+        let weak = desktop.as_weak();
         let cmd_tx = cmd_tx.clone();
         let model = model.clone();
         let windows = windows.clone();
-        let weak = desktop.as_weak();
+        let wayland_env = wayland_env.clone();
+        let vol_tx = vol_cmd_tx.clone();
+        Rc::new(move |text: &str, ctrl, alt, shift, meta| {
+            let key = keybind::normalize_text(text);
+            let Some(bind) = keybinds
+                .iter()
+                .find(|b| b.matches(&key, ctrl, alt, shift, meta))
+            else {
+                return false;
+            };
+            if let Some(d) = weak.upgrade() {
+                run_action(
+                    &bind.action,
+                    &d,
+                    &cmd_tx,
+                    &model,
+                    &windows,
+                    &wayland_env,
+                    &vol_tx,
+                );
+            }
+            true
+        })
+    };
+
+    // Keys for the focused client: intercept shortcuts, else forward.
+    desktop.on_key_window({
+        let cmd_tx = cmd_tx.clone();
+        let run_binding = run_binding.clone();
         move |_id, text, pressed, ctrl, alt, shift, meta| {
-            if !pressed {
+            if pressed && run_binding(text.as_str(), ctrl, alt, shift, meta) {
                 return;
             }
-            // Super+1..4 switches workspace; Super+Shift+1..4 moves the focused
-            // window there. These are handled by the shell, not forwarded.
-            if meta {
-                if let Some(n) = text.chars().next().and_then(|c| c.to_digit(10)) {
-                    if (1..=WORKSPACES).contains(&n) {
-                        let ws = (n - 1) as i32;
-                        if shift {
-                            move_focused_to_workspace(&model, &windows, ws);
-                        } else if let Some(d) = weak.upgrade() {
-                            d.set_active_workspace(ws);
-                        }
-                        return;
-                    }
-                }
-            }
             forward_key(&cmd_tx, text.as_str(), ctrl, alt, shift);
+        }
+    });
+
+    // Keys when no client is focused (root focus scope): shortcuts only.
+    desktop.on_key_shortcut({
+        let run_binding = run_binding.clone();
+        move |text, pressed, ctrl, alt, shift, meta| {
+            if pressed {
+                run_binding(text.as_str(), ctrl, alt, shift, meta);
+            }
         }
     });
 
@@ -935,6 +973,110 @@ fn raise_and_focus(model: &Rc<VecModel<WindowTile>>, windows: &Rc<RefCell<Window
     }
 }
 
+/// Focus the next/previous window on the active workspace (Alt-Tab).
+fn cycle_focus(
+    d: &Desktop,
+    model: &Rc<VecModel<WindowTile>>,
+    windows: &Rc<RefCell<Windows>>,
+    cmd_tx: &s_compositor_wayland::CommandSender<s_compositor_wayland::Command>,
+    forward: bool,
+) {
+    let ws = d.get_active_workspace();
+    let mut ids: Vec<u64> = Vec::new();
+    for i in 0..model.row_count() {
+        if let Some(t) = model.row_data(i) {
+            if t.workspace == ws && !t.minimized {
+                ids.push(t.id as u64);
+            }
+        }
+    }
+    if ids.is_empty() {
+        return;
+    }
+    let focused = windows.borrow().focused;
+    let cur = focused.and_then(|f| ids.iter().position(|&x| x == f));
+    let next = match cur {
+        Some(i) if forward => (i + 1) % ids.len(),
+        Some(i) => (i + ids.len() - 1) % ids.len(),
+        None => 0,
+    };
+    let id = ids[next];
+    raise_and_focus(model, windows, id);
+    let _ = cmd_tx.send(s_compositor_wayland::Command::FocusWindow(
+        s_compositor_wayland::WindowId(id),
+    ));
+}
+
+/// Run a keybinding action against the shell.
+#[allow(clippy::too_many_arguments)]
+fn run_action(
+    action: &keybind::Action,
+    d: &Desktop,
+    cmd_tx: &s_compositor_wayland::CommandSender<s_compositor_wayland::Command>,
+    model: &Rc<VecModel<WindowTile>>,
+    windows: &Rc<RefCell<Windows>>,
+    wayland_env: &Rc<RefCell<Option<(String, String)>>>,
+    vol_tx: &Option<std::sync::mpsc::Sender<volume::VolCommand>>,
+) {
+    use keybind::Action;
+    let workspaces = WORKSPACES as i32;
+    match action {
+        Action::Spawn(cmd) => {
+            let env = wayland_env.borrow();
+            let env = env
+                .as_ref()
+                .map(|(disp, run)| (disp.as_str(), run.as_str()));
+            spawn_command(cmd, env);
+        }
+        Action::StartMenu => d.set_start_menu_visible(!d.get_start_menu_visible()),
+        Action::Launcher => d.set_launcher_visible(true),
+        Action::Settings => d.set_settings_visible(true),
+        Action::QuickSettings => d.set_quick_settings_visible(!d.get_quick_settings_visible()),
+        Action::Lock => {
+            d.set_lock_wrong(false);
+            d.set_locked(true);
+        }
+        Action::Logout => {
+            let _ = slint::quit_event_loop();
+        }
+        Action::CloseWindow => {
+            if let Some(id) = windows.borrow().focused {
+                let _ = cmd_tx.send(s_compositor_wayland::Command::CloseWindow(
+                    s_compositor_wayland::WindowId(id),
+                ));
+            }
+        }
+        Action::NextWindow => cycle_focus(d, model, windows, cmd_tx, true),
+        Action::PrevWindow => cycle_focus(d, model, windows, cmd_tx, false),
+        Action::Workspace(n) => d.set_active_workspace(((*n as i32) - 1).clamp(0, workspaces - 1)),
+        Action::MoveToWorkspace(n) => {
+            move_focused_to_workspace(model, windows, ((*n as i32) - 1).clamp(0, workspaces - 1))
+        }
+        Action::WorkspaceNext => {
+            d.set_active_workspace((d.get_active_workspace() + 1).rem_euclid(workspaces))
+        }
+        Action::WorkspacePrev => {
+            d.set_active_workspace((d.get_active_workspace() - 1).rem_euclid(workspaces))
+        }
+        Action::VolumeUp | Action::VolumeDown => {
+            if let Some(tx) = vol_tx {
+                let delta = if matches!(action, Action::VolumeUp) {
+                    5.0
+                } else {
+                    -5.0
+                };
+                let target = (d.get_volume() + delta).clamp(0.0, 100.0);
+                let _ = tx.send(volume::VolCommand::Set(target));
+            }
+        }
+        Action::VolumeMute => {
+            if let Some(tx) = vol_tx {
+                let _ = tx.send(volume::VolCommand::ToggleMute);
+            }
+        }
+    }
+}
+
 /// Apply persisted settings to the UI.
 fn apply_config(d: &Desktop, c: &config::Config) {
     let theme = d.global::<Theme>();
@@ -956,6 +1098,7 @@ fn current_config(
     bg: &Rc<RefCell<Option<String>>>,
     menu: &Rc<Vec<config::AppEntry>>,
     lock_password: &Rc<RefCell<String>>,
+    keybinds: &Rc<Vec<keybind::Keybind>>,
 ) -> config::Config {
     let theme = d.global::<Theme>();
     config::Config {
@@ -966,6 +1109,7 @@ fn current_config(
         background: bg.borrow().clone(),
         menu: (**menu).clone(),
         lock_password: lock_password.borrow().clone(),
+        keybinds: (**keybinds).clone(),
     }
 }
 
