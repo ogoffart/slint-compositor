@@ -287,6 +287,7 @@ pub fn run(
     let mut state = SlickState {
         display_handle: dh.clone(),
         loop_signal: event_loop.get_signal(),
+        loop_handle: event_loop.handle(),
         compositor_state,
         xdg_shell_state,
         xdg_decoration_state,

@@ -537,12 +537,37 @@ impl SeatHandler for SlickState {
 impl SelectionHandler for SlickState {
     type SelectionUserData = ();
 
+    /// A Wayland client set (or cleared) a selection: mirror it to X so X11 apps
+    /// can paste it.
     fn new_selection(
         &mut self,
-        _ty: SelectionTarget,
-        _source: Option<SelectionSource>,
+        ty: SelectionTarget,
+        source: Option<SelectionSource>,
         _seat: Seat<Self>,
     ) {
+        if let Some(xwm) = self.xwm.as_mut() {
+            let mimes = source.map(|s| s.mime_types());
+            if let Err(err) = xwm.new_selection(ty, mimes) {
+                log::warn!("xwayland: failed to advertise selection to X: {err}");
+            }
+        }
+    }
+
+    /// A Wayland client is reading a selection that X owns: ask X to write it.
+    fn send_selection(
+        &mut self,
+        ty: SelectionTarget,
+        mime_type: String,
+        fd: std::os::fd::OwnedFd,
+        _seat: Seat<Self>,
+        _user_data: &(),
+    ) {
+        let handle = self.loop_handle.clone();
+        if let Some(xwm) = self.xwm.as_mut() {
+            if let Err(err) = xwm.send_selection(ty, mime_type, fd, handle) {
+                log::warn!("xwayland: failed to send X selection to Wayland: {err}");
+            }
+        }
     }
 }
 

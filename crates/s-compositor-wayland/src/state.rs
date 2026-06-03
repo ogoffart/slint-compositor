@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
-use smithay::reexports::calloop::LoopSignal;
+use smithay::reexports::calloop::{LoopHandle, LoopSignal};
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::wl_callback::WlCallback;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -29,6 +29,8 @@ use crate::Event;
 pub struct SlickState {
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
+    /// Event-loop handle, used to drive XWayland clipboard transfers.
+    pub loop_handle: LoopHandle<'static, SlickState>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,

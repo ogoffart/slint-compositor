@@ -13,6 +13,7 @@ use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Logical, Rectangle};
+use smithay::wayland::selection::SelectionTarget;
 use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
 use smithay::xwayland::xwm::{Reorder, ResizeEdge, XwmId};
 use smithay::xwayland::{X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler};
@@ -169,6 +170,68 @@ impl XwmHandler for SlickState {
     }
 
     fn move_request(&mut self, _xwm: XwmId, _window: X11Surface, _button: u32) {}
+
+    // --- Clipboard / primary-selection bridge (X -> Wayland) ---
+
+    fn allow_selection_access(&mut self, _xwm: XwmId, _selection: SelectionTarget) -> bool {
+        // Single-seat shell: let X clients read the clipboard and primary.
+        true
+    }
+
+    /// An X client set a selection: mirror it to Wayland so Wayland apps can paste.
+    fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
+        let dh = self.display_handle.clone();
+        let seat = self.seat.clone();
+        match selection {
+            SelectionTarget::Clipboard => {
+                smithay::wayland::selection::data_device::set_data_device_selection(
+                    &dh,
+                    &seat,
+                    mime_types,
+                    (),
+                );
+            }
+            SelectionTarget::Primary => {
+                smithay::wayland::selection::primary_selection::set_primary_selection(
+                    &dh,
+                    &seat,
+                    mime_types,
+                    (),
+                );
+            }
+        }
+    }
+
+    /// An X client is reading an X-advertised selection that a Wayland client
+    /// owns: pipe the Wayland client's data into the provided fd.
+    fn send_selection(
+        &mut self,
+        _xwm: XwmId,
+        selection: SelectionTarget,
+        mime_type: String,
+        fd: std::os::fd::OwnedFd,
+    ) {
+        match selection {
+            SelectionTarget::Clipboard => {
+                if let Err(err) =
+                    smithay::wayland::selection::data_device::request_data_device_client_selection(
+                        &self.seat, mime_type, fd,
+                    )
+                {
+                    log::debug!("xwayland: clipboard send to X failed: {err}");
+                }
+            }
+            SelectionTarget::Primary => {
+                if let Err(err) =
+                    smithay::wayland::selection::primary_selection::request_primary_client_selection(
+                        &self.seat, mime_type, fd,
+                    )
+                {
+                    log::debug!("xwayland: primary send to X failed: {err}");
+                }
+            }
+        }
+    }
 }
 
 impl XWaylandShellHandler for SlickState {
