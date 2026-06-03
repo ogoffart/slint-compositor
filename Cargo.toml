@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/slick",
-    "crates/slick-wayland",
-    "crates/slick-render",
-    "crates/slick-shell",
-    "crates/slick-tray",
+    "crates/s-compositor",
+    "crates/s-compositor-wayland",
+    "crates/s-compositor-render",
+    "crates/s-compositor-shell",
+    "crates/s-compositor-tray",
 ]
 
 [workspace.package]
@@ -15,10 +15,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/ogoffart/slick"
 
 [workspace.dependencies]
-slick-wayland = { path = "crates/slick-wayland" }
-slick-render = { path = "crates/slick-render" }
-slick-shell = { path = "crates/slick-shell" }
-slick-tray = { path = "crates/slick-tray" }
+s-compositor-wayland = { path = "crates/s-compositor-wayland" }
+s-compositor-render = { path = "crates/s-compositor-render" }
+s-compositor-shell = { path = "crates/s-compositor-shell" }
+s-compositor-tray = { path = "crates/s-compositor-tray" }
 
 slint = { version = "1.16", default-features = false, features = [
     "compat-1-2",

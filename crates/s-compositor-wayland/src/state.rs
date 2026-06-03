@@ -18,7 +18,7 @@ use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 
-use slick_shell::WindowId;
+use s_compositor_shell::WindowId;
 
 use crate::workspace::Workspaces;
 use crate::Event;
@@ -59,7 +59,7 @@ pub struct SlickState {
 pub struct WindowEntry {
     pub id: WindowId,
     pub toplevel: ToplevelSurface,
-    /// Whether slick draws server-side decorations for this window. False when
+    /// Whether s-compositor draws server-side decorations for this window. False when
     /// the client requested client-side decorations via xdg-decoration.
     pub decorated: bool,
 }

@@ -1,20 +1,20 @@
 [package]
-name = "slick"
+name = "s-compositor"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-default-run = "slick"
+default-run = "s-compositor"
 
 [[bin]]
-name = "slick"
+name = "s-compositor"
 path = "src/main.rs"
 
 [dependencies]
-slick-wayland.workspace = true
-slick-shell.workspace = true
-slick-render.workspace = true
-slick-tray.workspace = true
+s-compositor-wayland.workspace = true
+s-compositor-shell.workspace = true
+s-compositor-render.workspace = true
+s-compositor-tray.workspace = true
 slint.workspace = true
 glow.workspace = true
 chrono.workspace = true

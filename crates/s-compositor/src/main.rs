@@ -1,4 +1,4 @@
-//! slick — a Rust/Slint Wayland desktop shell.
+//! s-compositor — a Rust/Slint Wayland desktop shell.
 //!
 //! Slint owns the main thread (UI + output + input + GL); the Smithay-based
 //! Wayland protocol engine runs on its own thread and reports state changes back
@@ -37,12 +37,12 @@ fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // Spawn the Wayland compositor on its own thread.
-    let (tx, rx) = channel::<slick_wayland::Event>();
-    let (cmd_tx, cmd_rx) = slick_wayland::command_channel();
+    let (tx, rx) = channel::<s_compositor_wayland::Event>();
+    let (cmd_tx, cmd_rx) = s_compositor_wayland::command_channel();
     std::thread::Builder::new()
-        .name("slick-wayland".into())
+        .name("s-compositor-wayland".into())
         .spawn(move || {
-            if let Err(err) = slick_wayland::run(tx, cmd_rx) {
+            if let Err(err) = s_compositor_wayland::run(tx, cmd_rx) {
                 log::error!("wayland thread exited: {err:?}");
             }
         })?;
@@ -53,7 +53,7 @@ fn main() -> anyhow::Result<()> {
     desktop.set_windows(ModelRc::from(model.clone()));
     let windows = Rc::new(RefCell::new(Windows::default()));
     let bridge = Rc::new(RefCell::new(GlBridge::default()));
-    // (WAYLAND_DISPLAY, XDG_RUNTIME_DIR) of slick's compositor, learned from Ready.
+    // (WAYLAND_DISPLAY, XDG_RUNTIME_DIR) of s-compositor's compositor, learned from Ready.
     let wayland_env: Rc<RefCell<Option<(String, String)>>> = Rc::new(RefCell::new(None));
 
     // Upload client frames into shared GL textures during rendering, where the
@@ -103,8 +103,8 @@ fn main() -> anyhow::Result<()> {
     desktop.on_close_window({
         let cmd_tx = cmd_tx.clone();
         move |id| {
-            let _ = cmd_tx.send(slick_wayland::Command::CloseWindow(
-                slick_wayland::WindowId(id as u64),
+            let _ = cmd_tx.send(s_compositor_wayland::Command::CloseWindow(
+                s_compositor_wayland::WindowId(id as u64),
             ));
         }
     });
@@ -170,8 +170,8 @@ fn main() -> anyhow::Result<()> {
         let windows = windows.clone();
         move |id| {
             raise_and_focus(&model, &windows, id as u64);
-            let _ = cmd_tx.send(slick_wayland::Command::FocusWindow(
-                slick_wayland::WindowId(id as u64),
+            let _ = cmd_tx.send(s_compositor_wayland::Command::FocusWindow(
+                s_compositor_wayland::WindowId(id as u64),
             ));
         }
     });
@@ -201,8 +201,8 @@ fn main() -> anyhow::Result<()> {
             let windows = windows.borrow();
             if let Some(&row) = windows.rows.get(&(id as u64)) {
                 if let Some(tile) = model.row_data(row) {
-                    let _ = cmd_tx.send(slick_wayland::Command::ResizeWindow {
-                        id: slick_wayland::WindowId(id as u64),
+                    let _ = cmd_tx.send(s_compositor_wayland::Command::ResizeWindow {
+                        id: s_compositor_wayland::WindowId(id as u64),
                         width: (tile.width + dw).max(1.0) as i32,
                         height: (tile.height + dh).max(1.0) as i32,
                     });
@@ -215,14 +215,14 @@ fn main() -> anyhow::Result<()> {
     desktop.on_pointer_window({
         let cmd_tx = cmd_tx.clone();
         move |id, x, y, kind, btn| {
-            let id = slick_wayland::WindowId(id as u64);
+            let id = s_compositor_wayland::WindowId(id as u64);
             let cmd = match kind {
-                1 | 2 => slick_wayland::Command::PointerButton {
+                1 | 2 => s_compositor_wayland::Command::PointerButton {
                     id,
                     button: evdev_button(btn),
                     pressed: kind == 1,
                 },
-                _ => slick_wayland::Command::PointerMotion {
+                _ => s_compositor_wayland::Command::PointerMotion {
                     id,
                     x: x as f64,
                     y: y as f64,
@@ -236,8 +236,8 @@ fn main() -> anyhow::Result<()> {
         let cmd_tx = cmd_tx.clone();
         move |id, dx, dy| {
             // Wayland axis is positive-down; Slint scroll delta is positive-up.
-            let _ = cmd_tx.send(slick_wayland::Command::PointerAxis {
-                id: slick_wayland::WindowId(id as u64),
+            let _ = cmd_tx.send(s_compositor_wayland::Command::PointerAxis {
+                id: s_compositor_wayland::WindowId(id as u64),
                 dx: -dx as f64,
                 dy: -dy as f64,
             });
@@ -259,7 +259,7 @@ fn main() -> anyhow::Result<()> {
         let weak = desktop.as_weak();
         move || {
             if let Some(d) = weak.upgrade() {
-                d.set_clock_time(slick_shell::format_clock(Local::now()).into());
+                d.set_clock_time(s_compositor_shell::format_clock(Local::now()).into());
             }
         }
     };
@@ -297,12 +297,12 @@ fn main() -> anyhow::Result<()> {
 
 /// Apply a compositor event. Returns true if a redraw is needed.
 fn handle_event(
-    event: slick_wayland::Event,
+    event: s_compositor_wayland::Event,
     model: &Rc<VecModel<WindowTile>>,
     windows: &Rc<RefCell<Windows>>,
     wayland_env: &Rc<RefCell<Option<(String, String)>>>,
 ) -> bool {
-    use slick_wayland::Event;
+    use s_compositor_wayland::Event;
     match event {
         Event::Ready {
             socket_name,
@@ -422,7 +422,7 @@ fn evdev_button(btn: i32) -> u32 {
 
 /// Forward one key press as a modifier-wrapped tap to the focused window.
 fn forward_key(
-    cmd_tx: &slick_wayland::CommandSender<slick_wayland::Command>,
+    cmd_tx: &s_compositor_wayland::CommandSender<s_compositor_wayland::Command>,
     text: &str,
     ctrl: bool,
     alt: bool,
@@ -442,7 +442,7 @@ fn forward_key(
         mods.push(42); // KEY_LEFTSHIFT
     }
     let key = |keycode: u32, pressed: bool| {
-        let _ = cmd_tx.send(slick_wayland::Command::Key { keycode, pressed });
+        let _ = cmd_tx.send(s_compositor_wayland::Command::Key { keycode, pressed });
     };
     for m in &mods {
         key(*m, true);
@@ -557,8 +557,8 @@ fn evdev_keycode(text: &str) -> Option<(u32, bool)> {
     Some(mapped)
 }
 
-/// Spawn a shell command detached, pointed at slick's compositor. `wayland` is
-/// `(WAYLAND_DISPLAY, XDG_RUNTIME_DIR)` of slick's own socket.
+/// Spawn a shell command detached, pointed at s-compositor's compositor. `wayland` is
+/// `(WAYLAND_DISPLAY, XDG_RUNTIME_DIR)` of s-compositor's own socket.
 fn spawn_command(cmd: &str, wayland: Option<(&str, &str)>) {
     let cmd = cmd.trim();
     if cmd.is_empty() {
@@ -567,8 +567,8 @@ fn spawn_command(cmd: &str, wayland: Option<(&str, &str)>) {
 
     let mut command = std::process::Command::new("/bin/sh");
     command.arg("-c").arg(cmd);
-    // Children must connect to slick. Remove any inherited WAYLAND_SOCKET (an fd
-    // slick received from its own host): libwayland prefers it over
+    // Children must connect to s-compositor. Remove any inherited WAYLAND_SOCKET (an fd
+    // s-compositor received from its own host): libwayland prefers it over
     // WAYLAND_DISPLAY, which would make the child target the wrong compositor and
     // fail with "permission denied". Also drop DISPLAY so toolkits don't fall
     // back to X.
@@ -585,7 +585,7 @@ fn spawn_command(cmd: &str, wayland: Option<(&str, &str)>) {
         );
     } else {
         log::warn!(
-            "launching `{cmd}` but slick's compositor socket is not ready yet; \
+            "launching `{cmd}` but s-compositor's compositor socket is not ready yet; \
              the child will inherit the host's environment"
         );
     }

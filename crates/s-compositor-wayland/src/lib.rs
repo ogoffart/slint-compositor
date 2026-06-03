@@ -1,4 +1,4 @@
-//! The slick Wayland protocol engine, built on Smithay.
+//! The s-compositor Wayland protocol engine, built on Smithay.
 //!
 //! This crate is rendering-agnostic: it owns the Wayland display, socket, client
 //! state and protocol handlers, and runs them on a `calloop` event loop. It does
@@ -26,7 +26,7 @@ mod input;
 mod state;
 mod workspace;
 
-pub use slick_shell::WindowId;
+pub use s_compositor_shell::WindowId;
 pub use state::SlickState;
 pub use workspace::Workspaces;
 
@@ -58,7 +58,7 @@ pub enum Event {
         height: u32,
         pixels: Vec<u8>,
         title: String,
-        /// Whether slick should draw server-side decorations for this window.
+        /// Whether s-compositor should draw server-side decorations for this window.
         decorated: bool,
     },
 }
@@ -176,11 +176,11 @@ pub fn run(
     // Advertise a single virtual output; many clients (e.g. foot) refuse to map
     // without one.
     let output = smithay::output::Output::new(
-        "slick-0".into(),
+        "s-compositor-0".into(),
         smithay::output::PhysicalProperties {
             size: (0, 0).into(),
             subpixel: smithay::output::Subpixel::Unknown,
-            make: "slick".into(),
+            make: "s-compositor".into(),
             model: "virtual".into(),
         },
     );
@@ -278,7 +278,7 @@ pub fn run(
         )
         .map_err(|e| anyhow::anyhow!("failed to insert frame timer: {e}"))?;
 
-    log::info!("slick compositor listening on {runtime_dir}/{socket_name}");
+    log::info!("s-compositor listening on {runtime_dir}/{socket_name}");
     let _ = events.send(Event::Ready {
         socket_name: socket_name.clone(),
         runtime_dir: runtime_dir.clone(),
@@ -296,7 +296,7 @@ pub fn run(
 }
 
 /// Bind the compositor's listening socket. Tries `XDG_RUNTIME_DIR` first, then
-/// falls back to a private `slick-<uid>` directory under the temp dir if that is
+/// falls back to a private `s-compositor-<uid>` directory under the temp dir if that is
 /// not writable. Returns the socket plus its name and directory.
 fn bind_socket() -> anyhow::Result<(ListeningSocket, String, String)> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -312,7 +312,7 @@ fn bind_socket() -> anyhow::Result<(ListeningSocket, String, String)> {
     let uid = std::fs::metadata("/proc/self")
         .map(|m| m.uid())
         .unwrap_or(0);
-    let fallback = std::env::temp_dir().join(format!("slick-{uid}"));
+    let fallback = std::env::temp_dir().join(format!("s-compositor-{uid}"));
     candidates.push(fallback.clone());
 
     let mut last_err: Option<String> = None;
