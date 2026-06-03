@@ -1,10 +1,21 @@
 import { Panel } from "panel.slint";
 import { Launcher } from "launcher.slint";
 
-// Root scene. In later milestones the area left of the panel becomes the
-// composited client-window layer (Slint `Image`s backed by GL textures).
+// A composited client window: its current frame plus geometry.
+export struct WindowTile {
+    id: int,
+    texture: image,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
+
+// Root scene. The area left of the panel is the composited client-window
+// layer (Slint `Image`s backed by the clients' committed buffers).
 export component Desktop inherits Window {
     in property <string> clock-time;
+    in property <[WindowTile]> windows;
     in-out property <bool> launcher-visible: false;
 
     // Emitted when the user submits a command in the launcher.
@@ -14,6 +25,17 @@ export component Desktop inherits Window {
     preferred-height: 800px;
     title: "slick";
     background: #1e1e2e;
+
+    // Client windows, composited under the panel.
+    for win in root.windows: Image {
+        source: win.texture;
+        x: win.x;
+        y: win.y;
+        width: win.width;
+        height: win.height;
+        image-fit: fill;
+        image-rendering: pixelated;
+    }
 
     Panel {
         clock-time: root.clock-time;

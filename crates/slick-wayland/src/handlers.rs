@@ -6,14 +6,24 @@
 //! and map a toplevel. Rendering of client buffers and input forwarding arrive
 //! in M2/M3.
 
-use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
+use smithay::reexports::wayland_server::protocol::wl_callback::WlCallback;
+use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Client;
 use smithay::wayland::buffer::BufferHandler;
-use smithay::wayland::compositor::{CompositorClientState, CompositorHandler, CompositorState};
+use smithay::wayland::compositor::{
+    with_states, BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+    SurfaceAttributes,
+};
 use smithay::wayland::output::OutputHandler;
+use smithay::wayland::shm::{with_buffer_contents, BufferData};
+
+use slick_render::{convert_to_rgba, ShmFormat};
+use slick_shell::WindowId;
+
+use crate::state::WindowEntry;
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
 };
@@ -43,9 +53,89 @@ impl CompositorHandler for SlickState {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        // Track buffer/damage bookkeeping so the renderer (M2) can pick it up.
-        on_commit_buffer_handler::<Self>(surface);
+        let Some(entry) = self.windows.get(surface) else {
+            return;
+        };
+        let id = entry.id;
+
+        // Collect frame callbacks (fired later, throttled) and the new buffer.
+        let mut callbacks = Vec::new();
+        let buffer_event = extract_commit(surface, id, &mut callbacks);
+        self.pending_callbacks.append(&mut callbacks);
+        if let Some(event) = buffer_event {
+            let _ = self.events.send(event);
+        }
     }
+}
+
+/// Drain the surface's pending frame callbacks into `callbacks`, and, if a new
+/// shm buffer was attached, copy its pixels into a `WindowBuffer` event.
+fn extract_commit(
+    surface: &WlSurface,
+    id: WindowId,
+    callbacks: &mut Vec<WlCallback>,
+) -> Option<Event> {
+    with_states(surface, |states| {
+        let mut guard = states.cached_state.get::<SurfaceAttributes>();
+        let attrs = guard.current();
+
+        callbacks.append(&mut attrs.frame_callbacks);
+
+        // Consume any newly attached buffer (clearing it so we don't reprocess).
+        let buffer = match attrs.buffer.take() {
+            Some(BufferAssignment::NewBuffer(buffer)) => buffer,
+            _ => return None,
+        };
+
+        let result = with_buffer_contents(&buffer, read_shm);
+        // shm contents are copied within the callback; release the buffer so the
+        // client can reuse it.
+        buffer.release();
+
+        match result {
+            Ok(Some((width, height, pixels))) => Some(Event::WindowBuffer {
+                id,
+                width,
+                height,
+                pixels,
+            }),
+            Ok(None) => {
+                log::debug!("window {id:?}: unsupported shm format");
+                None
+            }
+            Err(err) => {
+                log::debug!("window {id:?}: non-shm buffer ({err:?})");
+                None
+            }
+        }
+    })
+}
+
+/// Read an shm buffer's contents into a tightly-packed RGBA8 buffer.
+fn read_shm(ptr: *const u8, len: usize, data: BufferData) -> Option<(u32, u32, Vec<u8>)> {
+    let format = match data.format {
+        wl_shm::Format::Argb8888 => ShmFormat::Argb8888,
+        wl_shm::Format::Xrgb8888 => ShmFormat::Xrgb8888,
+        _ => return None,
+    };
+    if data.width <= 0 || data.height <= 0 {
+        return None;
+    }
+    let offset = data.offset.max(0) as usize;
+    if offset > len {
+        return None;
+    }
+    // SAFETY: `ptr` is valid for `len` bytes for the duration of this callback,
+    // and we only read within `[offset, len)`.
+    let slice = unsafe { std::slice::from_raw_parts(ptr.add(offset), len - offset) };
+    let rgba = convert_to_rgba(
+        slice,
+        data.width as usize,
+        data.height as usize,
+        data.stride as usize,
+        format,
+    );
+    Some((data.width as u32, data.height as u32, rgba))
 }
 
 impl BufferHandler for SlickState {
@@ -69,8 +159,24 @@ impl XdgShellHandler for SlickState {
 
         let id = self.allocate_window_id();
         self.workspaces.add_window(id);
+        let wl_surface = surface.wl_surface().clone();
+        self.windows.insert(
+            wl_surface,
+            WindowEntry {
+                id,
+                toplevel: surface,
+            },
+        );
         let _ = self.events.send(Event::WindowAdded(id));
         log::info!("new toplevel -> window {:?}", id);
+    }
+
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        if let Some(entry) = self.windows.remove(surface.wl_surface()) {
+            self.workspaces.remove_window(entry.id);
+            let _ = self.events.send(Event::WindowRemoved(entry.id));
+            log::info!("toplevel destroyed -> window {:?}", entry.id);
+        }
     }
 
     fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {}

@@ -4276,6 +4276,7 @@ dependencies = [
  "anyhow",
  "calloop 0.14.4",
  "log",
+ "slick-render",
  "slick-shell",
  "smithay",
 ]

@@ -1,15 +1,19 @@
 //! The compositor's global state and per-client data.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use smithay::input::{Seat, SeatState};
 use smithay::reexports::calloop::LoopSignal;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
+use smithay::reexports::wayland_server::protocol::wl_callback::WlCallback;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
-use smithay::wayland::shell::xdg::XdgShellState;
+use smithay::wayland::shell::xdg::{ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 
 use slick_shell::WindowId;
@@ -33,8 +37,24 @@ pub struct SlickState {
     pub workspaces: Workspaces,
     pub next_window_id: u64,
 
+    /// Mapped toplevel windows, keyed by their root `wl_surface`.
+    pub windows: HashMap<WlSurface, WindowEntry>,
+
+    /// Start of the compositor, used to timestamp `wl_callback.done`.
+    pub start_time: Instant,
+
+    /// Frame callbacks awaiting completion. Drained on a ~60Hz timer rather
+    /// than fired on commit, so clients don't busy-loop rendering.
+    pub pending_callbacks: Vec<WlCallback>,
+
     /// Outbound channel used to notify the UI thread of shell events.
     pub events: std::sync::mpsc::Sender<Event>,
+}
+
+/// A tracked toplevel window.
+pub struct WindowEntry {
+    pub id: WindowId,
+    pub toplevel: ToplevelSurface,
 }
 
 impl SlickState {
@@ -43,6 +63,11 @@ impl SlickState {
         let id = WindowId(self.next_window_id);
         self.next_window_id += 1;
         id
+    }
+
+    /// Milliseconds since startup, for frame-callback timestamps.
+    pub fn millis_since_start(&self) -> u32 {
+        self.start_time.elapsed().as_millis() as u32
     }
 }
 

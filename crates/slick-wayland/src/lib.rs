@@ -6,10 +6,12 @@
 //! State updates flow out to the UI thread over an [`Event`] channel.
 
 use std::sync::mpsc::Sender;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use smithay::input::SeatState;
 use smithay::reexports::calloop::generic::Generic;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::Display;
 use smithay::wayland::compositor::CompositorState;
@@ -31,7 +33,7 @@ pub use workspace::Workspaces;
 pub const WORKSPACE_COUNT: usize = 4;
 
 /// Events emitted by the compositor thread for the UI thread to consume.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Event {
     /// The compositor is up and accepting clients on the given `WAYLAND_DISPLAY`.
     Ready {
@@ -40,6 +42,40 @@ pub enum Event {
     WindowAdded(WindowId),
     WindowRemoved(WindowId),
     WindowTitleChanged(WindowId, String),
+    /// A window committed a new frame: tightly-packed RGBA8 of `width`x`height`.
+    WindowBuffer {
+        id: WindowId,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
+}
+
+impl std::fmt::Debug for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Event::Ready { socket_name } => f
+                .debug_struct("Ready")
+                .field("socket_name", socket_name)
+                .finish(),
+            Event::WindowAdded(id) => f.debug_tuple("WindowAdded").field(id).finish(),
+            Event::WindowRemoved(id) => f.debug_tuple("WindowRemoved").field(id).finish(),
+            Event::WindowTitleChanged(id, t) => f
+                .debug_tuple("WindowTitleChanged")
+                .field(id)
+                .field(t)
+                .finish(),
+            // Don't dump the pixel buffer.
+            Event::WindowBuffer {
+                id, width, height, ..
+            } => f
+                .debug_struct("WindowBuffer")
+                .field("id", id)
+                .field("width", width)
+                .field("height", height)
+                .finish(),
+        }
+    }
 }
 
 /// Run the Wayland compositor event loop. Intended to be called on a dedicated
@@ -74,6 +110,9 @@ pub fn run(events: Sender<Event>) -> anyhow::Result<()> {
         seat,
         workspaces: Workspaces::new(WORKSPACE_COUNT),
         next_window_id: 0,
+        windows: std::collections::HashMap::new(),
+        start_time: std::time::Instant::now(),
+        pending_callbacks: Vec::new(),
         events: events.clone(),
     };
 
@@ -102,12 +141,30 @@ pub fn run(events: Sender<Event>) -> anyhow::Result<()> {
                     display
                         .get_mut()
                         .dispatch_clients(state)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                        .map_err(std::io::Error::other)?;
                 }
                 Ok(PostAction::Continue)
             },
         )
         .map_err(|e| anyhow::anyhow!("failed to insert display source: {e}"))?;
+
+    // Fire queued frame callbacks at ~60Hz so clients pace their rendering to
+    // roughly display rate instead of busy-looping.
+    handle
+        .insert_source(
+            Timer::from_duration(Duration::from_millis(16)),
+            |_, _, state: &mut SlickState| {
+                let now = state.millis_since_start();
+                for callback in state.pending_callbacks.drain(..) {
+                    callback.done(now);
+                }
+                if let Err(err) = state.display_handle.flush_clients() {
+                    log::warn!("failed to flush clients: {err}");
+                }
+                TimeoutAction::ToDuration(Duration::from_millis(16))
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("failed to insert frame timer: {e}"))?;
 
     log::info!("slick compositor listening on {socket_name}");
     let _ = events.send(Event::Ready {
