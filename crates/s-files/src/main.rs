@@ -152,16 +152,31 @@ mod screenshot {
         // A few sidebar entries so the screenshot shows the Places panel.
         let places = Rc::new(VecModel::<Place>::default());
         places.set_vec(vec![
-            Place { name: "Home".into(), path: dir.clone().into() },
-            Place { name: "Documents".into(), path: format!("{dir}/Documents").into() },
-            Place { name: "Pictures".into(), path: format!("{dir}/Pictures").into() },
-            Place { name: "Filesystem".into(), path: "/".into() },
+            Place {
+                name: "Home".into(),
+                path: dir.clone().into(),
+            },
+            Place {
+                name: "Documents".into(),
+                path: format!("{dir}/Documents").into(),
+            },
+            Place {
+                name: "Pictures".into(),
+                path: format!("{dir}/Pictures").into(),
+            },
+            Place {
+                name: "Filesystem".into(),
+                path: "/".into(),
+            },
         ]);
         files.set_places(places.into());
         let browser = Rc::new(RefCell::new(Browser::new(files.as_weak(), items)));
         browser.borrow_mut().navigate(PathBuf::from(&dir));
         // Optionally apply a sort column (clicked again = descending).
-        if let Some(s) = std::env::var("SFILES_SHOT_SORT").ok().and_then(|v| v.parse::<i32>().ok()) {
+        if let Some(s) = std::env::var("SFILES_SHOT_SORT")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+        {
             browser.borrow_mut().set_sort(s);
         }
         if let Ok(f) = std::env::var("SFILES_SHOT_FILTER") {

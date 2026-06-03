@@ -448,7 +448,9 @@ impl Browser {
                 let size_str = if is_dir {
                     "—".to_string()
                 } else {
-                    meta.as_ref().map(|m| human_size(m.len())).unwrap_or_default()
+                    meta.as_ref()
+                        .map(|m| human_size(m.len()))
+                        .unwrap_or_default()
                 };
                 let modified_str = mtime.map(format_time).unwrap_or_default();
                 // A thumbnail for image files (skip very large ones to stay snappy).
@@ -518,7 +520,10 @@ impl Browser {
             let ord = match key {
                 1 => a.len.cmp(&b.len),
                 2 => a.mtime.cmp(&b.mtime),
-                3 => a.kind.cmp(b.kind).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+                3 => a
+                    .kind
+                    .cmp(b.kind)
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
                 _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             };
             if self.sort_desc {
@@ -606,11 +611,7 @@ impl Browser {
 /// Launch a file with the system default handler, detached from this process.
 fn launch(path: &Path) {
     use std::process::{Command, Stdio};
-    let opener = if which("xdg-open") {
-        "xdg-open"
-    } else {
-        "gio"
-    };
+    let opener = if which("xdg-open") { "xdg-open" } else { "gio" };
     let mut cmd = Command::new(opener);
     if opener == "gio" {
         cmd.arg("open");
@@ -732,7 +733,14 @@ pub fn home_dir() -> PathBuf {
 pub fn places() -> Vec<(String, String)> {
     let home = home_dir();
     let mut places = vec![("Home".to_string(), home.to_string_lossy().into_owned())];
-    for sub in ["Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"] {
+    for sub in [
+        "Desktop",
+        "Documents",
+        "Downloads",
+        "Music",
+        "Pictures",
+        "Videos",
+    ] {
         let path = home.join(sub);
         if path.is_dir() {
             places.push((sub.to_string(), path.to_string_lossy().into_owned()));
@@ -754,7 +762,10 @@ mod tests {
         assert_eq!(file_kind(Path::new("a.mp3"), false), "audio");
         assert_eq!(file_kind(Path::new("main.rs"), false), "code");
         assert_eq!(file_kind(Path::new("a.pdf"), false), "pdf");
-        assert_eq!(file_kind(Path::new("/nonexistent/unknown.xyz"), false), "file");
+        assert_eq!(
+            file_kind(Path::new("/nonexistent/unknown.xyz"), false),
+            "file"
+        );
     }
 
     #[test]
@@ -783,7 +794,10 @@ mod tests {
 
     fn scratch() -> PathBuf {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("sfiles-model-{n}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -803,7 +817,10 @@ mod tests {
         b.navigate(dir.clone()); // selects the only entry
         b.copy();
         b.paste();
-        assert_eq!(std::fs::read_to_string(dir.join("a (copy).txt")).unwrap(), "hello");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("a (copy).txt")).unwrap(),
+            "hello"
+        );
         assert!(dir.join("a.txt").exists()); // original kept
     }
 
@@ -925,7 +942,10 @@ mod tests {
         // b.txt is still the cursor (now at index 1 by coincidence) and selected.
         assert!(b.marks[b.cursor as usize]);
         assert_eq!(
-            b.entries[b.cursor as usize].file_name().unwrap().to_string_lossy(),
+            b.entries[b.cursor as usize]
+                .file_name()
+                .unwrap()
+                .to_string_lossy(),
             "b.txt"
         );
     }

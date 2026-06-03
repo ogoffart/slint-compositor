@@ -25,6 +25,11 @@ pub enum Action {
     VolumeUp,
     VolumeDown,
     VolumeMute,
+    SnapLeft,
+    SnapRight,
+    SnapUp,
+    SnapDown,
+    Maximize,
 }
 
 /// A modifier combination plus a (normalized) key, bound to an action.
@@ -81,6 +86,13 @@ fn key_to_name(key: &str) -> String {
         "+" => "Plus",
         "," => "Comma",
         "." => "Period",
+        "\u{f700}" => "Up",
+        "\u{f701}" => "Down",
+        "\u{f702}" => "Left",
+        "\u{f703}" => "Right",
+        "\u{f729}" => "Home",
+        "\u{f72b}" => "End",
+        "\u{7f}" => "Delete",
         other => other,
     }
     .to_string()
@@ -109,6 +121,13 @@ fn normalize_key(name: &str) -> String {
         "plus" => "+".to_string(),
         "comma" => ",".to_string(),
         "period" => ".".to_string(),
+        "up" => "\u{f700}".to_string(),
+        "down" => "\u{f701}".to_string(),
+        "left" => "\u{f702}".to_string(),
+        "right" => "\u{f703}".to_string(),
+        "home" => "\u{f729}".to_string(),
+        "end" => "\u{f72b}".to_string(),
+        "delete" | "del" => "\u{7f}".to_string(),
         other => other.to_string(),
     }
 }
@@ -163,6 +182,11 @@ fn parse_action(s: &str) -> Option<Action> {
         "volume-up" => Action::VolumeUp,
         "volume-down" => Action::VolumeDown,
         "volume-mute" | "mute" => Action::VolumeMute,
+        "snap-left" => Action::SnapLeft,
+        "snap-right" => Action::SnapRight,
+        "snap-up" => Action::SnapUp,
+        "snap-down" => Action::SnapDown,
+        "maximize" => Action::Maximize,
         _ => return None,
     })
 }
@@ -186,6 +210,11 @@ fn action_to_string(action: &Action) -> String {
         Action::VolumeUp => "volume-up".into(),
         Action::VolumeDown => "volume-down".into(),
         Action::VolumeMute => "volume-mute".into(),
+        Action::SnapLeft => "snap-left".into(),
+        Action::SnapRight => "snap-right".into(),
+        Action::SnapUp => "snap-up".into(),
+        Action::SnapDown => "snap-down".into(),
+        Action::Maximize => "maximize".into(),
     }
 }
 
@@ -204,6 +233,10 @@ pub fn defaults() -> Vec<Keybind> {
         "Super+Equal = volume-up",
         "Super+Minus = volume-down",
         "Super+0 = volume-mute",
+        "Super+Left = snap-left",
+        "Super+Right = snap-right",
+        "Super+Up = maximize",
+        "Super+Down = snap-down",
     ]
     .into_iter()
     .filter_map(parse)
@@ -249,7 +282,12 @@ mod tests {
 
     #[test]
     fn round_trips_through_config_string() {
-        for spec in ["Super+d = start-menu", "Super+Equal = volume-up"] {
+        for spec in [
+            "Super+d = start-menu",
+            "Super+Equal = volume-up",
+            "Super+Left = snap-left",
+            "Super+Up = maximize",
+        ] {
             let b = parse(spec).unwrap();
             let reparsed = parse(&b.to_config_string()).unwrap();
             assert_eq!(b, reparsed);

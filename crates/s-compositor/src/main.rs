@@ -1038,6 +1038,55 @@ fn cycle_focus(
     ));
 }
 
+/// Which half/region of the work area to snap a window to.
+#[derive(Clone, Copy)]
+enum Snap {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// Snap the focused window to a half of the work area (keyboard tiling).
+fn snap_focused(
+    d: &Desktop,
+    model: &Rc<VecModel<WindowTile>>,
+    windows: &Rc<RefCell<Windows>>,
+    cmd_tx: &s_compositor_wayland::CommandSender<s_compositor_wayland::Command>,
+    snap: Snap,
+) {
+    let mut w = windows.borrow_mut();
+    let Some(id) = w.focused else {
+        return;
+    };
+    let Some(&row) = w.rows.get(&id) else {
+        return;
+    };
+    let Some(mut tile) = model.row_data(row) else {
+        return;
+    };
+    let (wx, wy, ww, wh) = work_area(d);
+    let (x, y, width, height) = match snap {
+        Snap::Left => (wx, wy, ww / 2.0, wh),
+        Snap::Right => (wx + ww / 2.0, wy, ww / 2.0, wh),
+        Snap::Up => (wx, wy, ww, wh / 2.0),
+        Snap::Down => (wx, wy + wh / 2.0, ww, wh / 2.0),
+    };
+    let titlebar = if tile.decorated { 28.0 } else { 0.0 };
+    tile.x = x;
+    tile.y = y;
+    tile.width = width;
+    tile.height = (height - titlebar).max(1.0);
+    tile.maximized = false;
+    w.restore.remove(&id);
+    let _ = cmd_tx.send(s_compositor_wayland::Command::ResizeWindow {
+        id: s_compositor_wayland::WindowId(id),
+        width: tile.width as i32,
+        height: tile.height as i32,
+    });
+    model.set_row_data(row, tile);
+}
+
 /// Run a keybinding action against the shell.
 #[allow(clippy::too_many_arguments)]
 fn run_action(
@@ -1103,6 +1152,22 @@ fn run_action(
         Action::VolumeMute => {
             if let Some(tx) = vol_tx {
                 let _ = tx.send(volume::VolCommand::ToggleMute);
+            }
+        }
+        Action::SnapLeft => snap_focused(d, model, windows, cmd_tx, Snap::Left),
+        Action::SnapRight => snap_focused(d, model, windows, cmd_tx, Snap::Right),
+        Action::SnapUp => snap_focused(d, model, windows, cmd_tx, Snap::Up),
+        Action::SnapDown => snap_focused(d, model, windows, cmd_tx, Snap::Down),
+        Action::Maximize => {
+            let cur = {
+                let w = windows.borrow();
+                w.focused
+                    .and_then(|id| w.rows.get(&id).copied())
+                    .and_then(|row| model.row_data(row))
+                    .map(|t| (t.id as u64, t.maximized))
+            };
+            if let Some((id, maxed)) = cur {
+                set_maximized(d, model, windows, cmd_tx, id, !maxed);
             }
         }
     }
