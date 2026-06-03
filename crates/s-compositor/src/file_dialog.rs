@@ -232,6 +232,7 @@ impl Controller {
                 size: Default::default(),
                 modified: Default::default(),
                 thumb: Default::default(),
+                selected: false,
             });
         }
         let has_entries = !rows.is_empty();
