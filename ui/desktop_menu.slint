@@ -1,0 +1,91 @@
+import { Theme } from "theme.slint";
+
+component MenuItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    callback clicked();
+    height: 34px;
+    border-radius: 7px;
+    background: ta.has-hover ? Theme.surface : transparent;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 14px;
+        spacing: 10px;
+        Text {
+            text: root.icon;
+            font-size: 15px;
+            width: 20px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label;
+            color: Theme.fg;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// A right-click context menu for the desktop background.
+export component DesktopMenu inherits Rectangle {
+    in property <length> menu-x;
+    in property <length> menu-y;
+    callback open-terminal();
+    callback open-settings();
+    callback change-wallpaper();
+    callback dismiss();
+
+    // Transparent backdrop: any click dismisses.
+    TouchArea {
+        clicked => {
+            root.dismiss();
+        }
+    }
+
+    Rectangle {
+        // Keep the menu on-screen.
+        x: min(root.menu-x, root.width - self.width - 6px);
+        y: min(root.menu-y, root.height - self.height - 6px);
+        width: 196px;
+        height: layout.preferred-height;
+        background: Theme.bg;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Theme.hover;
+
+        TouchArea {}
+
+        layout := VerticalLayout {
+            padding: 6px;
+            spacing: 2px;
+            MenuItem {
+                icon: "🖥";
+                label: "Open terminal";
+                clicked => {
+                    root.open-terminal();
+                }
+            }
+            MenuItem {
+                icon: "🖼";
+                label: "Change wallpaper";
+                clicked => {
+                    root.change-wallpaper();
+                }
+            }
+            MenuItem {
+                icon: "⚙";
+                label: "Settings";
+                clicked => {
+                    root.open-settings();
+                }
+            }
+        }
+    }
+}

@@ -122,6 +122,22 @@ pub fn file_manager_command() -> String {
         .unwrap_or_else(|| "s-files".to_string())
 }
 
+/// The command to launch a terminal, used by the desktop right-click menu.
+pub fn terminal_command() -> String {
+    [
+        "alacritty",
+        "foot",
+        "kitty",
+        "wezterm",
+        "gnome-terminal",
+        "xterm",
+    ]
+    .iter()
+    .find(|bin| on_path(bin))
+    .map(|bin| bin.to_string())
+    .unwrap_or_else(|| "xterm".to_string())
+}
+
 /// Auto-discover sensible default start-menu apps: a browser, a terminal, a file
 /// manager and a few games, picking whatever is installed.
 pub fn discover_default_apps() -> Vec<AppEntry> {

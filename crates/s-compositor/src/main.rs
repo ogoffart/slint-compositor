@@ -123,6 +123,7 @@ fn main() -> anyhow::Result<()> {
     desktop.set_panel_launchers(ModelRc::from(Rc::new(VecModel::from(to_entries(
         &panel_apps,
     )))));
+    desktop.set_terminal_command(config::terminal_command().into());
 
     // App launcher: filter the app list as the query changes.
     let launcher_model = Rc::new(VecModel::<MenuEntry>::default());

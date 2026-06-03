@@ -221,6 +221,18 @@ fn main() {
     );
     ui.set_launcher_visible(false);
 
+    // Desktop right-click menu.
+    ui.set_desktop_menu_x(360.0);
+    ui.set_desktop_menu_y(300.0);
+    ui.set_desktop_menu_visible(true);
+    save(
+        &ui,
+        &window,
+        PhysicalSize::new(1100, 720),
+        "shot_deskmenu.png",
+    );
+    ui.set_desktop_menu_visible(false);
+
     // 5. Quick settings (volume + Wi-Fi) with tray icons in the panel.
     ui.set_tray_icons(
         Rc::new(slint::VecModel::from(vec![
