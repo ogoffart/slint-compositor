@@ -61,6 +61,13 @@ struct Windows {
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // `system-tray` turns on zbus's `tokio` feature for the whole binary, so the
+    // zbus calls made on this (Slint main) thread — notably Slint's winit backend
+    // watching the XDG colour scheme — route through `tokio::spawn_blocking` and
+    // panic without a Tokio runtime in scope. Enter one for the program's life.
+    let runtime = tokio::runtime::Builder::new_multi_thread().build()?;
+    let _runtime_guard = runtime.enter();
+
     // Spawn the Wayland compositor on its own thread.
     let (tx, rx) = channel::<s_compositor_wayland::Event>();
     let (cmd_tx, cmd_rx) = s_compositor_wayland::command_channel();

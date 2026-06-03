@@ -4044,6 +4044,7 @@ dependencies = [
  "s-compositor-wayland",
  "slint",
  "slint-build",
+ "tokio",
  "zbus",
 ]
 

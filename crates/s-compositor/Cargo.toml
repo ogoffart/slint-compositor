@@ -23,6 +23,11 @@ env_logger.workspace = true
 anyhow.workspace = true
 zbus = "5"
 async-channel = "2"
+# A Tokio runtime is entered on the main thread: `system-tray` enables zbus's
+# `tokio` feature for the whole binary, so Slint's winit backend (which uses
+# zbus to watch the XDG colour scheme) calls `tokio::spawn_blocking` and would
+# otherwise panic with "no reactor running" on the Slint thread.
+tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
 libpulse-binding = "2.30.1"
 image = "0.25.10"
 
