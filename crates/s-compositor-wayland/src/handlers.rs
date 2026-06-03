@@ -342,7 +342,12 @@ impl XdgShellHandler for SlickState {
             WindowEntry {
                 id,
                 toplevel: surface,
-                decorated: true,
+                // Assume the client draws its own decorations unless it explicitly
+                // negotiates server-side ones via xdg-decoration (see
+                // `new_decoration`). This avoids double title bars on clients that
+                // always draw CSD but don't speak the decoration protocol (GTK,
+                // weston toytoolkit).
+                decorated: false,
             },
         );
         let _ = self.events.send(Event::WindowAdded(id));
