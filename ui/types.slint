@@ -35,6 +35,12 @@ export struct FileItem {
     selected: bool,
 }
 
+// A shortcut shown in the Files sidebar (Home, XDG dirs, the filesystem root).
+export struct Place {
+    name: string,
+    path: string,
+}
+
 // A start-menu application entry. `kind`: "app" launches `command`, "run" opens
 // the run dialog, "lock" locks the screen, "logout" quits the compositor.
 export struct MenuEntry {

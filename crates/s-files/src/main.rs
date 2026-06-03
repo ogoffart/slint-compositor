@@ -26,6 +26,19 @@ fn main() -> Result<(), slint::PlatformError> {
     let items = Rc::new(VecModel::<FileItem>::default());
     window.set_items(items.clone().into());
 
+    // The sidebar shortcuts are fixed for the session.
+    let places = Rc::new(VecModel::<Place>::default());
+    places.set_vec(
+        model::places()
+            .into_iter()
+            .map(|(name, path)| Place {
+                name: name.into(),
+                path: path.into(),
+            })
+            .collect::<Vec<_>>(),
+    );
+    window.set_places(places.into());
+
     let browser: model::Shared = Rc::new(RefCell::new(Browser::new(window.as_weak(), items)));
 
     // The starting directory: the first CLI argument, or $HOME.
@@ -58,12 +71,18 @@ fn main() -> Result<(), slint::PlatformError> {
     on!(on_cut, cut);
     on!(on_paste, paste);
     on!(on_trash, trash);
+    on!(on_toggle_hidden, toggle_hidden);
     on!(on_activate, activate, |idx|);
     on!(on_row_pressed, row_pressed, |idx, ctrl, shift|);
     on!(on_move_cursor, move_cursor, |delta, shift|);
+    on!(on_sort_by, set_sort, |key|);
     {
         let b = browser.clone();
         window.on_navigate_to(move |path| b.borrow_mut().navigate_to(path.as_str()));
+    }
+    {
+        let b = browser.clone();
+        window.on_go_to(move |path| b.borrow_mut().go_to(path.as_str()));
     }
     {
         let b = browser.clone();
@@ -126,8 +145,21 @@ mod screenshot {
         let files = Files::new().unwrap();
         let items = Rc::new(VecModel::<FileItem>::default());
         files.set_items(items.clone().into());
+        // A few sidebar entries so the screenshot shows the Places panel.
+        let places = Rc::new(VecModel::<Place>::default());
+        places.set_vec(vec![
+            Place { name: "Home".into(), path: dir.clone().into() },
+            Place { name: "Documents".into(), path: format!("{dir}/Documents").into() },
+            Place { name: "Pictures".into(), path: format!("{dir}/Pictures").into() },
+            Place { name: "Filesystem".into(), path: "/".into() },
+        ]);
+        files.set_places(places.into());
         let browser = Rc::new(RefCell::new(Browser::new(files.as_weak(), items)));
         browser.borrow_mut().navigate(PathBuf::from(&dir));
+        // Optionally apply a sort column (clicked again = descending).
+        if let Some(s) = std::env::var("SFILES_SHOT_SORT").ok().and_then(|v| v.parse::<i32>().ok()) {
+            browser.borrow_mut().set_sort(s);
+        }
         // Optionally Shift-select rows 0..=N to show multi-selection.
         if let Some(n) = std::env::var("SFILES_SHOT_RANGE")
             .ok()
