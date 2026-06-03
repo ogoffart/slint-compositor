@@ -15,6 +15,7 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 mod file_dialog;
 mod gl_bridge;
+mod portal;
 use gl_bridge::{Frame, GlBridge};
 
 slint::include_modules!();
@@ -115,6 +116,10 @@ fn main() -> anyhow::Result<()> {
     let file_dialog: file_dialog::SharedController = Rc::new(RefCell::new(
         file_dialog::Controller::new(desktop.as_weak(), fd_items),
     ));
+
+    // Expose the file dialog to other apps via the XDG FileChooser portal.
+    let (portal_tx, portal_rx) = async_channel::unbounded::<portal::Request>();
+    portal::spawn(portal_tx);
 
     desktop.on_change_background({
         let file_dialog = file_dialog.clone();
@@ -278,10 +283,23 @@ fn main() -> anyhow::Result<()> {
         let windows = windows.clone();
         let model = model.clone();
         let wayland_env = wayland_env.clone();
+        let file_dialog = file_dialog.clone();
         move || {
             let mut dirty = false;
             while let Ok(event) = rx.try_recv() {
                 dirty |= handle_event(event, &model, &windows, &wayland_env);
+            }
+            // Serve pending portal file-open requests with the same dialog.
+            while let Ok(request) = portal_rx.try_recv() {
+                let reply = request.reply;
+                file_dialog.borrow_mut().open(
+                    &request.title,
+                    file_dialog::home_dir(),
+                    false,
+                    Box::new(move |path| {
+                        let _ = reply.try_send(path);
+                    }),
+                );
             }
             if dirty {
                 if let Some(d) = weak.upgrade() {

@@ -50,10 +50,38 @@ Working today (verified nested under Xvfb + llvmpipe):
   Frame callbacks are throttled to ~60Hz.
 - **Server-side decorations**: s-compositor forces `zxdg-decoration` ServerSide and
   draws the title bar (title + close button) and border itself.
-- Right-edge panel with a live clock and a **command launcher** (▶).
+- **Input**: pointer and keyboard are forwarded to the focused client; windows
+  can be moved (title-bar drag) and resized (corner grip).
+- Right-edge panel with a live clock, a **command launcher** (▶), a **taskbar**,
+  and a **settings** button (⚙) to change the desktop background.
+- A reusable **file dialog**, also exposed as an XDG **FileChooser portal**
+  backend so other apps open files through it (see below).
 
-Input forwarding, taskbar, tray and virtual-desktop switching are the next
-milestones (M3–M10; see the project plan). Bare metal uses `backend-linuxkms`.
+Virtual-desktop switching and the system tray are the next milestones. Bare
+metal uses `backend-linuxkms`.
+
+## File chooser portal
+
+s-compositor implements `org.freedesktop.impl.portal.FileChooser`, so other
+applications can open files through its dialog. To route requests to it, install
+the backend declaration and configuration:
+
+```sh
+sudo install -Dm644 data/s-compositor.portal \
+  /usr/share/xdg-desktop-portal/portals/s-compositor.portal
+mkdir -p ~/.config/xdg-desktop-portal
+cp data/s-compositor-portals.conf ~/.config/xdg-desktop-portal/portals.conf
+```
+
+Test the backend directly (no `xdg-desktop-portal` needed):
+
+```sh
+gdbus call --session --dest org.freedesktop.impl.portal.desktop.scompositor \
+  --object-path /org/freedesktop/portal/desktop \
+  --method org.freedesktop.impl.portal.FileChooser.OpenFile \
+  /req app "" "Pick a file" "@a{sv} {}"
+# => (uint32 0, {'uris': <['file:///path/to/chosen']>})
+```
 
 ## Building & running
 
