@@ -23,7 +23,7 @@ slick-tray = { path = "crates/slick-tray" }
 slint = { version = "1.16", default-features = false, features = [
     "compat-1-2",
     "std",
-    "renderer-femtovg",
+    "renderer-skia-opengl",
     "backend-winit",
 ] }
 slint-build = "1.16"
