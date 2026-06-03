@@ -200,11 +200,31 @@ impl Browser {
         for (name, path) in dirs.into_iter().chain(files) {
             let is_dir = path.is_dir();
             let kind = file_kind(&path, is_dir);
+            let meta = std::fs::metadata(&path).ok();
+            let size = if is_dir {
+                "—".to_string()
+            } else {
+                meta.as_ref().map(|m| human_size(m.len())).unwrap_or_default()
+            };
+            let modified = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .map(format_time)
+                .unwrap_or_default();
+            // A thumbnail for image files (skip very large ones to stay snappy).
+            let thumb = if is_image(&path) && meta.as_ref().map_or(false, |m| m.len() < 8 << 20) {
+                slint::Image::load_from_path(&path).unwrap_or_default()
+            } else {
+                slint::Image::default()
+            };
             self.entries.push(path);
             rows.push(FileItem {
                 name: name.into(),
                 is_dir,
                 kind: kind.into(),
+                size: size.into(),
+                modified: modified.into(),
+                thumb,
             });
         }
         let has_entries = !rows.is_empty();
@@ -264,6 +284,13 @@ fn describe(path: &Path) -> String {
         Ok(meta) => format!("{} · {}", human_size(meta.len()), file_kind(path, false)),
         Err(_) => file_kind(path, false).to_string(),
     }
+}
+
+/// Format a modification time as a compact local "YYYY-MM-DD HH:MM" stamp.
+fn format_time(time: std::time::SystemTime) -> String {
+    chrono::DateTime::<chrono::Local>::from(time)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 fn human_size(bytes: u64) -> String {

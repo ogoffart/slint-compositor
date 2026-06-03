@@ -1,9 +1,10 @@
 import { Theme } from "theme.slint";
 
-// A small type-coloured icon: a folder for directories, otherwise a document
-// glyph tinted by file kind. Drawn (rather than emoji) so it renders crisply
-// regardless of the available fonts. Shared by the file dialog and the
-// standalone Files browser.
+// A type-coloured icon: a folder for directories, otherwise a document glyph
+// tinted by file kind, with a short badge. Drawn (rather than emoji) so it
+// renders crisply at any size — every dimension is a fraction of the icon's
+// box, so the same component serves the 22px list rows and the 64px icon grid.
+// Shared by the file dialog and the standalone Files browser.
 export component FileIcon inherits Rectangle {
     in property <string> kind;
     in property <bool> is-dir;
@@ -33,49 +34,52 @@ export component FileIcon inherits Rectangle {
         kind == "exec" ? "$" :
         "";
 
+    property <length> u: min(root.width, root.height);
+
     if is-dir: Rectangle {
         // Folder: a body with a small tab on the top-left.
         Rectangle {
-            y: 3px;
-            width: 9px;
-            height: 5px;
-            x: 2px;
+            x: root.u * 0.09;
+            y: root.u * 0.14;
+            width: root.u * 0.41;
+            height: root.u * 0.23;
             background: root.tint.darker(0.15);
-            border-radius: 1px;
+            border-radius: root.u * 0.05;
         }
         Rectangle {
-            y: 6px;
-            width: 18px;
-            height: 12px;
-            x: 2px;
+            x: root.u * 0.09;
+            y: root.u * 0.27;
+            width: root.u * 0.82;
+            height: root.u * 0.55;
             background: root.tint;
-            border-radius: 2px;
+            border-radius: root.u * 0.09;
         }
     }
     if !is-dir: Rectangle {
         // Document: a rounded page with a coloured spine and a kind badge.
-        width: 16px;
-        height: 19px;
+        width: root.u * 0.66;
+        height: root.u * 0.84;
         background: Theme.surface.brighter(0.4);
-        border-radius: 2px;
-        border-width: 1px;
+        border-radius: root.u * 0.09;
+        border-width: max(1px, root.u * 0.045);
         border-color: root.tint;
         Rectangle {
             x: 0;
-            width: 3px;
+            width: root.u * 0.14;
             height: parent.height;
             background: root.tint;
-            border-top-left-radius: 2px;
-            border-bottom-left-radius: 2px;
+            border-top-left-radius: parent.border-radius;
+            border-bottom-left-radius: parent.border-radius;
         }
         Text {
             text: root.badge;
             color: root.tint;
-            font-size: 9px;
+            font-size: root.u * 0.4;
+            font-weight: 700;
             horizontal-alignment: center;
             vertical-alignment: center;
-            x: 3px;
-            width: parent.width - 3px;
+            x: root.u * 0.14;
+            width: parent.width - root.u * 0.14;
         }
     }
 }

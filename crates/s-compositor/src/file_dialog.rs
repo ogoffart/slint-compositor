@@ -228,6 +228,10 @@ impl Controller {
                 name: name.into(),
                 is_dir,
                 kind: kind.into(),
+                // The dialog uses only name/kind; the details-view fields stay empty.
+                size: Default::default(),
+                modified: Default::default(),
+                thumb: Default::default(),
             });
         }
         let has_entries = !rows.is_empty();
