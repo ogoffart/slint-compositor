@@ -77,7 +77,9 @@ pub fn blit_over(
             }
             let dx = dx as usize;
             let s = (row * sw + col) * 4;
-            let Some(sp) = src.get(s..s + 4) else { continue };
+            let Some(sp) = src.get(s..s + 4) else {
+                continue;
+            };
             let a = sp[3] as u32;
             if a == 0 {
                 continue;

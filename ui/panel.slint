@@ -24,20 +24,32 @@ component PanelButton inherits Rectangle {
     }
 }
 
-// A taskbar entry for one window.
+// A taskbar entry for one window: its icon and title.
 component TaskItem inherits Rectangle {
     in property <WindowTile> tile;
     callback activate();
     border-radius: 6px;
     background: tile.focused ? Theme.accent : (a.has-hover ? Theme.surface : Theme.panel);
-    Text {
-        text: tile.title == "" ? "?" : tile.title;
-        color: Theme.fg;
-        font-size: 11px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
-        width: parent.width - 8px;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 5px;
+        alignment: center;
+        Image {
+            source: tile.icon;
+            width: 18px;
+            height: 18px;
+            image-fit: contain;
+        }
+        Text {
+            text: tile.title == "" ? "?" : tile.title;
+            color: Theme.fg;
+            font-size: 11px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
     }
     a := TouchArea {
         clicked => {

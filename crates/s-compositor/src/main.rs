@@ -16,6 +16,7 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 mod config;
 mod file_dialog;
 mod gl_bridge;
+mod icons;
 mod portal;
 use gl_bridge::{Frame, GlBridge};
 
@@ -94,6 +95,7 @@ fn main() -> anyhow::Result<()> {
     let layers_model = Rc::new(VecModel::<LayerTile>::default());
     desktop.set_layers(ModelRc::from(layers_model.clone()));
     let windows = Rc::new(RefCell::new(Windows::default()));
+    let icon_cache = Rc::new(icons::IconCache::default());
     let bridge = Rc::new(RefCell::new(GlBridge::default()));
     // (WAYLAND_DISPLAY, XDG_RUNTIME_DIR) of s-compositor's compositor, learned from Ready.
     let wayland_env: Rc<RefCell<Option<(String, String)>>> = Rc::new(RefCell::new(None));
@@ -487,6 +489,7 @@ fn main() -> anyhow::Result<()> {
         let wayland_env = wayland_env.clone();
         let file_dialog = file_dialog.clone();
         let cmd_tx = cmd_tx.clone();
+        let icon_cache = icon_cache.clone();
         move || {
             let mut dirty = false;
             let active_ws = weak
@@ -512,6 +515,7 @@ fn main() -> anyhow::Result<()> {
                     &layers_model,
                     &windows,
                     &wayland_env,
+                    &icon_cache,
                     active_ws,
                 );
             }
@@ -548,6 +552,7 @@ fn handle_event(
     layers_model: &Rc<VecModel<LayerTile>>,
     windows: &Rc<RefCell<Windows>>,
     wayland_env: &Rc<RefCell<Option<(String, String)>>>,
+    icon_cache: &Rc<icons::IconCache>,
     active_workspace: i32,
 ) -> bool {
     use s_compositor_wayland::Event;
@@ -568,6 +573,7 @@ fn handle_event(
             height,
             pixels,
             title,
+            app_id,
             decorated,
         } => {
             let mut windows = windows.borrow_mut();
@@ -583,6 +589,7 @@ fn handle_event(
                 model.push(WindowTile {
                     id: id.0 as i32,
                     texture: slint::Image::default(),
+                    icon: icon_cache.get(&app_id),
                     title: title.into(),
                     decorated,
                     focused: false,

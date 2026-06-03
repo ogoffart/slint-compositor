@@ -73,6 +73,7 @@ impl CompositorHandler for SlickState {
         if let Some(entry) = self.windows.get(&root) {
             let (id, decorated) = (entry.id, entry.decorated);
             let title = read_title(&root);
+            let app_id = read_app_id(&root);
             let mut cache = std::mem::take(&mut self.surface_pixels);
             let buffer = composite_tree(&root, &mut cache, &mut callbacks);
             self.surface_pixels = cache;
@@ -84,6 +85,7 @@ impl CompositorHandler for SlickState {
                     height,
                     pixels,
                     title,
+                    app_id,
                     decorated,
                 });
             }
@@ -284,6 +286,17 @@ fn read_title(surface: &WlSurface) -> String {
             .data_map
             .get::<XdgToplevelSurfaceData>()
             .and_then(|d| d.lock().unwrap().title.clone())
+            .unwrap_or_default()
+    })
+}
+
+/// Read the toplevel app-id (used to resolve a window icon).
+fn read_app_id(surface: &WlSurface) -> String {
+    with_states(surface, |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().unwrap().app_id.clone())
             .unwrap_or_default()
     })
 }

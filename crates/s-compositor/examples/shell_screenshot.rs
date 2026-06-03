@@ -50,6 +50,42 @@ fn save(ui: &Desktop, window: &MinimalSoftwareWindow, size: PhysicalSize, name: 
     println!("wrote {name} ({}x{})", buffer.width(), buffer.height());
 }
 
+/// A simple rounded solid-colour icon, standing in for a real app icon.
+fn solid_icon(r: u8, g: u8, b: u8) -> slint::Image {
+    let size = 32u32;
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(size, size);
+    let w = size as i32;
+    let px = buf.make_mut_slice();
+    for y in 0..w {
+        for x in 0..w {
+            // Round the corners a little.
+            let corner = 6;
+            let inside = !((x < corner && y < corner && (corner - x) + (corner - y) > corner)
+                || (x >= w - corner
+                    && y < corner
+                    && (x - (w - corner - 1)) + (corner - y) > corner)
+                || (x < corner
+                    && y >= w - corner
+                    && (corner - x) + (y - (w - corner - 1)) > corner)
+                || (x >= w - corner
+                    && y >= w - corner
+                    && (x - (w - corner - 1)) + (y - (w - corner - 1)) > corner));
+            let i = (y * w + x) as usize;
+            px[i] = if inside {
+                slint::Rgba8Pixel { r, g, b, a: 255 }
+            } else {
+                slint::Rgba8Pixel {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 0,
+                }
+            };
+        }
+    }
+    slint::Image::from_rgba8_premultiplied(buf)
+}
+
 fn main() {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
     slint::platform::set_platform(Box::new(TestPlatform {
@@ -62,17 +98,25 @@ fn main() {
     ui.set_clock_hours("12".into());
     ui.set_clock_minutes("34".into());
 
-    // A couple of fake taskbar windows.
+    // A couple of fake windows, one decorated with geometry and a synthetic icon
+    // so the title-bar and taskbar icons are visible.
     let windows = std::rc::Rc::new(slint::VecModel::from(vec![
         WindowTile {
             id: 1,
             title: "Terminal".into(),
+            icon: solid_icon(0x89, 0xb4, 0xfa),
+            decorated: true,
             focused: true,
+            x: 220.0,
+            y: 140.0,
+            width: 480.0,
+            height: 300.0,
             ..Default::default()
         },
         WindowTile {
             id: 2,
             title: "Editor".into(),
+            icon: solid_icon(0xa6, 0xe3, 0xa1),
             ..Default::default()
         },
     ]));

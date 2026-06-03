@@ -63,6 +63,8 @@ pub enum Event {
         height: u32,
         pixels: Vec<u8>,
         title: String,
+        /// The toplevel app-id, used to resolve a window icon.
+        app_id: String,
         /// Whether s-compositor should draw server-side decorations for this window.
         decorated: bool,
     },
@@ -173,6 +175,7 @@ impl std::fmt::Debug for Event {
                 width,
                 height,
                 title,
+                app_id,
                 decorated,
                 ..
             } => f
@@ -181,6 +184,7 @@ impl std::fmt::Debug for Event {
                 .field("width", width)
                 .field("height", height)
                 .field("title", title)
+                .field("app_id", app_id)
                 .field("decorated", decorated)
                 .finish(),
             Event::PopupBuffer {

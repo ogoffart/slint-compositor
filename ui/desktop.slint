@@ -68,8 +68,14 @@ component WindowFrame inherits Rectangle {
             HorizontalLayout {
                 padding-left: 8px;
                 padding-right: 4px;
-                spacing: 4px;
+                spacing: 6px;
 
+                Image {
+                    source: tile.icon;
+                    width: 18px;
+                    height: 18px;
+                    image-fit: contain;
+                }
                 Text {
                     text: tile.title == "" ? "(untitled)" : tile.title;
                     color: Theme.fg;
