@@ -4,7 +4,7 @@
 //! Wayland protocol engine runs on its own thread and reports state changes back
 //! over a channel which we drain on the UI thread.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::channel;
@@ -524,16 +524,29 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Notification daemon + on-screen popups.
-    let notif_model = Rc::new(VecModel::<Notification>::default());
-    desktop.set_notifications(ModelRc::from(notif_model.clone()));
-    let notif_expiry: Rc<RefCell<HashMap<u32, std::time::Instant>>> =
-        Rc::new(RefCell::new(HashMap::new()));
+    // Notification daemon + on-screen popups + history.
+    let notif = NotifState::new();
+    desktop.set_notifications(ModelRc::from(notif.popups.clone()));
+    desktop.set_notif_history(ModelRc::from(notif.history.clone()));
     let notif_rx = notify::spawn();
     desktop.on_dismiss_notification({
-        let notif_model = notif_model.clone();
-        let notif_expiry = notif_expiry.clone();
-        move |id| remove_notification(&notif_model, &notif_expiry, id as u32)
+        let notif = notif.clone();
+        move |id| notif.dismiss(id as u32)
+    });
+    desktop.on_clear_notifications({
+        let notif = notif.clone();
+        move || notif.clear_history()
+    });
+    desktop.on_toggle_dnd({
+        let notif = notif.clone();
+        let weak = desktop.as_weak();
+        move || {
+            let on = !notif.dnd.get();
+            notif.dnd.set(on);
+            if let Some(d) = weak.upgrade() {
+                d.set_dnd(on);
+            }
+        }
     });
 
     // Battery status via UPower.
@@ -667,8 +680,7 @@ fn main() -> anyhow::Result<()> {
         let windows = windows.clone();
         let wayland_env = wayland_env.clone();
         let vol_tx = vol_cmd_tx.clone();
-        let notif_model = notif_model.clone();
-        let notif_expiry = notif_expiry.clone();
+        let notif = notif.clone();
         let osd_until = osd_until.clone();
         Rc::new(move |text: &str, ctrl, alt, shift, meta| {
             let key = keybind::normalize_text(text);
@@ -687,8 +699,7 @@ fn main() -> anyhow::Result<()> {
                     &windows,
                     &wayland_env,
                     &vol_tx,
-                    &notif_model,
-                    &notif_expiry,
+                    &notif,
                 );
                 // Flash the volume OSD on a volume key.
                 if matches!(
@@ -782,8 +793,7 @@ fn main() -> anyhow::Result<()> {
         let tray_model = tray_model.clone();
         let tray_ids = tray_ids.clone();
         let wifi_model = wifi_model.clone();
-        let notif_model = notif_model.clone();
-        let notif_expiry = notif_expiry.clone();
+        let notif = notif.clone();
         let osd_until = osd_until.clone();
         move || {
             let mut dirty = false;
@@ -803,11 +813,11 @@ fn main() -> anyhow::Result<()> {
             // Drain notifications, and expire timed-out ones.
             if let Some(rx) = &notif_rx {
                 while let Ok(event) = rx.try_recv() {
-                    apply_notify_event(event, &notif_model, &notif_expiry);
+                    notif.apply(event);
                     dirty = true;
                 }
             }
-            if expire_notifications(&notif_model, &notif_expiry) {
+            if notif.expire() {
                 dirty = true;
             }
 
@@ -1285,8 +1295,7 @@ fn run_action(
     windows: &Rc<RefCell<Windows>>,
     wayland_env: &Rc<RefCell<Option<(String, String)>>>,
     vol_tx: &Option<std::sync::mpsc::Sender<volume::VolCommand>>,
-    notif_model: &Rc<VecModel<Notification>>,
-    notif_expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
+    notif: &NotifState,
 ) {
     use keybind::Action;
     let workspaces = WORKSPACES as i32;
@@ -1360,17 +1369,13 @@ fn run_action(
                 set_maximized(d, model, windows, cmd_tx, id, !maxed);
             }
         }
-        Action::Screenshot => take_screenshot(d, notif_model, notif_expiry),
+        Action::Screenshot => take_screenshot(d, notif),
     }
 }
 
 /// Capture the whole screen to a PNG in the user's Pictures directory and show a
 /// notification with the path.
-fn take_screenshot(
-    d: &Desktop,
-    notif_model: &Rc<VecModel<Notification>>,
-    notif_expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
-) {
+fn take_screenshot(d: &Desktop, notif: &NotifState) {
     let buffer = match d.window().take_snapshot() {
         Ok(b) => b,
         Err(err) => {
@@ -1397,39 +1402,10 @@ fn take_screenshot(
     ) {
         Ok(()) => {
             log::info!("screenshot saved to {}", path.display());
-            notify_internal(
-                notif_model,
-                notif_expiry,
-                "Screenshot",
-                &format!("Saved {name}"),
-            );
+            notif.internal("Screenshot", &format!("Saved {name}"));
         }
         Err(err) => log::warn!("screenshot: save failed: {err}"),
     }
-}
-
-/// Push a shell-internal notification (e.g. screenshot saved).
-fn notify_internal(
-    model: &Rc<VecModel<Notification>>,
-    expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
-    summary: &str,
-    body: &str,
-) {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static NEXT: AtomicU32 = AtomicU32::new(1_000_000_000);
-    let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    apply_notify_event(
-        notify::NotifyEvent::Add {
-            id,
-            app_name: "s-compositor".to_string(),
-            summary: summary.to_string(),
-            body: body.to_string(),
-            icon: String::new(),
-            timeout_ms: -1,
-        },
-        model,
-        expiry,
-    );
 }
 
 /// Apply persisted settings to the UI.
@@ -1618,79 +1594,127 @@ fn apply_net_event(event: network::NetEvent, d: &Desktop, model: &Rc<VecModel<Wi
 
 /// Apply a notification event: `Add` upserts a popup (and schedules its expiry),
 /// `Close` removes it.
-fn apply_notify_event(
-    event: notify::NotifyEvent,
-    model: &Rc<VecModel<Notification>>,
-    expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
-) {
-    match event {
-        notify::NotifyEvent::Add {
-            id,
-            app_name,
-            summary,
-            body,
-            icon,
-            timeout_ms,
-        } => {
-            let note = Notification {
-                id: id as i32,
-                app_name: app_name.into(),
-                summary: summary.into(),
-                body: body.into(),
-                icon: icons::image_for_icon_name(&icon),
-            };
-            let pos = (0..model.row_count())
-                .find(|&i| model.row_data(i).map(|n| n.id as u32) == Some(id));
-            match pos {
-                Some(i) => model.set_row_data(i, note),
-                None => model.push(note),
-            }
-            // 0 = never expire; -1 = default (5s); otherwise the given ms.
-            if timeout_ms != 0 {
-                let ms = if timeout_ms < 0 {
-                    5000
-                } else {
-                    timeout_ms as u64
+/// Notification state: on-screen popups, persistent history and Do-Not-Disturb.
+struct NotifState {
+    popups: Rc<VecModel<Notification>>,
+    history: Rc<VecModel<Notification>>,
+    expiry: RefCell<HashMap<u32, std::time::Instant>>,
+    dnd: Cell<bool>,
+}
+
+impl NotifState {
+    fn new() -> Rc<Self> {
+        Rc::new(Self {
+            popups: Rc::new(VecModel::default()),
+            history: Rc::new(VecModel::default()),
+            expiry: RefCell::new(HashMap::new()),
+            dnd: Cell::new(false),
+        })
+    }
+
+    /// Apply an incoming notification event: record it in history, and (unless
+    /// Do-Not-Disturb is on) show a popup that expires after its timeout.
+    fn apply(&self, event: notify::NotifyEvent) {
+        match event {
+            notify::NotifyEvent::Add {
+                id,
+                app_name,
+                summary,
+                body,
+                icon,
+                timeout_ms,
+            } => {
+                let note = Notification {
+                    id: id as i32,
+                    app_name: app_name.into(),
+                    summary: summary.into(),
+                    body: body.into(),
+                    icon: icons::image_for_icon_name(&icon),
                 };
-                expiry
-                    .borrow_mut()
-                    .insert(id, std::time::Instant::now() + Duration::from_millis(ms));
-            } else {
-                expiry.borrow_mut().remove(&id);
+                self.history_upsert(note.clone());
+                if self.dnd.get() {
+                    return;
+                }
+                let pos = (0..self.popups.row_count())
+                    .find(|&i| self.popups.row_data(i).map(|n| n.id as u32) == Some(id));
+                match pos {
+                    Some(i) => self.popups.set_row_data(i, note),
+                    None => self.popups.push(note),
+                }
+                // 0 = never expire; -1 = default (5s); otherwise the given ms.
+                if timeout_ms != 0 {
+                    let ms = if timeout_ms < 0 {
+                        5000
+                    } else {
+                        timeout_ms as u64
+                    };
+                    self.expiry
+                        .borrow_mut()
+                        .insert(id, std::time::Instant::now() + Duration::from_millis(ms));
+                } else {
+                    self.expiry.borrow_mut().remove(&id);
+                }
             }
+            notify::NotifyEvent::Close { id } => self.dismiss(id),
         }
-        notify::NotifyEvent::Close { id } => remove_notification(model, expiry, id),
     }
-}
 
-/// Remove timed-out notifications. Returns true if any were removed.
-fn expire_notifications(
-    model: &Rc<VecModel<Notification>>,
-    expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
-) -> bool {
-    let now = std::time::Instant::now();
-    let due: Vec<u32> = expiry
-        .borrow()
-        .iter()
-        .filter(|(_, &t)| t <= now)
-        .map(|(&id, _)| id)
-        .collect();
-    for id in &due {
-        remove_notification(model, expiry, *id);
+    /// Insert (newest-first) into the capped history, replacing any same id.
+    fn history_upsert(&self, note: Notification) {
+        if let Some(i) = (0..self.history.row_count())
+            .find(|&i| self.history.row_data(i).map(|n| n.id) == Some(note.id))
+        {
+            self.history.remove(i);
+        }
+        self.history.insert(0, note);
+        while self.history.row_count() > 50 {
+            self.history.remove(self.history.row_count() - 1);
+        }
     }
-    !due.is_empty()
-}
 
-fn remove_notification(
-    model: &Rc<VecModel<Notification>>,
-    expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
-    id: u32,
-) {
-    expiry.borrow_mut().remove(&id);
-    if let Some(i) =
-        (0..model.row_count()).find(|&i| model.row_data(i).map(|n| n.id as u32) == Some(id))
-    {
-        model.remove(i);
+    /// Dismiss a popup (history is kept).
+    fn dismiss(&self, id: u32) {
+        self.expiry.borrow_mut().remove(&id);
+        if let Some(i) = (0..self.popups.row_count())
+            .find(|&i| self.popups.row_data(i).map(|n| n.id as u32) == Some(id))
+        {
+            self.popups.remove(i);
+        }
+    }
+
+    /// Remove timed-out popups. Returns true if any were removed.
+    fn expire(&self) -> bool {
+        let now = std::time::Instant::now();
+        let due: Vec<u32> = self
+            .expiry
+            .borrow()
+            .iter()
+            .filter(|(_, &t)| t <= now)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in &due {
+            self.dismiss(*id);
+        }
+        !due.is_empty()
+    }
+
+    fn clear_history(&self) {
+        self.history.set_vec(Vec::<Notification>::new());
+    }
+
+    /// Push a shell-internal notification (e.g. screenshot saved).
+    fn internal(&self, summary: &str, body: &str) {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(1_000_000_000);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        self.apply(notify::NotifyEvent::Add {
+            id,
+            app_name: "s-compositor".to_string(),
+            summary: summary.to_string(),
+            body: body.to_string(),
+            icon: String::new(),
+            timeout_ms: -1,
+        });
     }
 }
 

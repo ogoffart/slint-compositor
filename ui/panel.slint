@@ -179,9 +179,11 @@ export component Panel inherits Rectangle {
     in property <[TrayIcon]> tray-icons;
     in property <[MenuEntry]> launchers;
     in property <bool> muted;
+    in property <bool> dnd;
     callback toggle-start-menu();
     callback toggle-settings();
     callback toggle-quick-settings();
+    callback toggle-notification-center();
     callback toggle-calendar();
     callback launch(string);
     callback activate(int);
@@ -224,6 +226,14 @@ export component Panel inherits Rectangle {
             tooltip: "Sound & network";
             edge: root.edge;
             clicked => { root.toggle-quick-settings(); }
+        }
+        PanelButton {
+            icon: root.dnd ? "🔕" : "🔔";
+            icon-color: Theme.fg;
+            height: 40px;
+            tooltip: "Notifications";
+            edge: root.edge;
+            clicked => { root.toggle-notification-center(); }
         }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; clicked => { root.toggle-calendar(); } }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
@@ -289,6 +299,14 @@ export component Panel inherits Rectangle {
             tooltip: "Sound & network";
             edge: root.edge;
             clicked => { root.toggle-quick-settings(); }
+        }
+        PanelButton {
+            icon: root.dnd ? "🔕" : "🔔";
+            icon-color: Theme.fg;
+            width: 40px;
+            tooltip: "Notifications";
+            edge: root.edge;
+            clicked => { root.toggle-notification-center(); }
         }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; clicked => { root.toggle-calendar(); } }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }

@@ -5,6 +5,7 @@ import { StartMenu } from "start_menu.slint";
 import { LockScreen } from "lock_screen.slint";
 import { QuickSettings } from "quick_settings.slint";
 import { Notifications } from "notifications.slint";
+import { NotificationCenter } from "notification_center.slint";
 import { CalendarPopover } from "calendar.slint";
 import { DesktopMenu } from "desktop_menu.slint";
 import { Osd } from "osd.slint";
@@ -300,9 +301,14 @@ export component Desktop inherits Window {
     callback wifi-connect(string, string);
     callback tray-activate(string);
 
-    // On-screen notifications.
+    // On-screen notifications + history center.
     in property <[Notification]> notifications;
+    in property <[Notification]> notif-history;
+    in-out property <bool> notification-center-visible: false;
+    in property <bool> dnd;
     callback dismiss-notification(int);
+    callback clear-notifications();
+    callback toggle-dnd();
 
     // Calendar popover (toggled from the panel clock).
     in-out property <bool> calendar-visible: false;
@@ -546,8 +552,12 @@ export component Desktop inherits Window {
         launch(cmd) => {
             root.launch(cmd);
         }
+        dnd: root.dnd;
         toggle-quick-settings => {
             root.quick-settings-visible = !root.quick-settings-visible;
+        }
+        toggle-notification-center => {
+            root.notification-center-visible = !root.notification-center-visible;
         }
         toggle-calendar => {
             root.calendar-visible = !root.calendar-visible;
@@ -572,6 +582,24 @@ export component Desktop inherits Window {
         notes: root.notifications;
         dismiss(id) => {
             root.dismiss-notification(id);
+        }
+    }
+
+    if root.notification-center-visible: NotificationCenter {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        notes: root.notif-history;
+        dnd: root.dnd;
+        clear => {
+            root.clear-notifications();
+        }
+        toggle-dnd => {
+            root.toggle-dnd();
+        }
+        dismiss => {
+            root.notification-center-visible = false;
         }
     }
 

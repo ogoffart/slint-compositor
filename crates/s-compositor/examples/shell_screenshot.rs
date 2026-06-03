@@ -233,6 +233,42 @@ fn main() {
     );
     ui.set_desktop_menu_visible(false);
 
+    // Notification center (history + DND + clear).
+    ui.set_notif_history(
+        Rc::new(slint::VecModel::from(vec![
+            Notification {
+                id: 3,
+                app_name: "Email".into(),
+                summary: "New message".into(),
+                body: "Alice: lunch at noon?".into(),
+                icon: solid_icon(0x89, 0xb4, 0xfa),
+            },
+            Notification {
+                id: 2,
+                app_name: "Updates".into(),
+                summary: "12 packages can be upgraded".into(),
+                body: "Run your package manager to apply them.".into(),
+                icon: solid_icon(0xa6, 0xe3, 0xa1),
+            },
+            Notification {
+                id: 1,
+                app_name: "s-compositor".into(),
+                summary: "Screenshot".into(),
+                body: "Saved Screenshot-20260603-120000.png".into(),
+                icon: solid_icon(0xcb, 0xa6, 0xf7),
+            },
+        ]))
+        .into(),
+    );
+    ui.set_notification_center_visible(true);
+    save(
+        &ui,
+        &window,
+        PhysicalSize::new(1100, 720),
+        "shot_notifcenter.png",
+    );
+    ui.set_notification_center_visible(false);
+
     // 5. Quick settings (volume + Wi-Fi) with tray icons in the panel.
     ui.set_tray_icons(
         Rc::new(slint::VecModel::from(vec![
