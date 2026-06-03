@@ -155,6 +155,7 @@ export component Panel inherits Rectangle {
     callback toggle-start-menu();
     callback toggle-settings();
     callback toggle-quick-settings();
+    callback toggle-calendar();
     callback activate(int);
     callback switch-workspace(int);
     callback tray-activate(string);
@@ -182,7 +183,7 @@ export component Panel inherits Rectangle {
             height: 40px;
             clicked => { root.toggle-quick-settings(); }
         }
-        Clock { hours: root.clock-hours; minutes: root.clock-minutes; }
+        Clock { hours: root.clock-hours; minutes: root.clock-minutes; clicked => { root.toggle-calendar(); } }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
         if root.tray-icons.length > 0: Rectangle { height: 1px; background: Theme.surface; }
         TrayStrip {
@@ -233,7 +234,7 @@ export component Panel inherits Rectangle {
             width: 40px;
             clicked => { root.toggle-quick-settings(); }
         }
-        Clock { hours: root.clock-hours; minutes: root.clock-minutes; }
+        Clock { hours: root.clock-hours; minutes: root.clock-minutes; clicked => { root.toggle-calendar(); } }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
         if root.tray-icons.length > 0: Rectangle { width: 1px; background: Theme.surface; }
         TrayStrip {

@@ -12,6 +12,7 @@ component TimeLabel inherits Text {
 export component Clock inherits Rectangle {
     in property <string> hours;
     in property <string> minutes;
+    callback clicked();
 
     // Our reported size is driven by the (constant) one-line probe so that the
     // `stacked` decision below can read `width` without forming a layout loop.
@@ -46,5 +47,11 @@ export component Clock inherits Rectangle {
         visible: root.stacked;
         x: (root.width - self.width) / 2;
         y: root.height / 2;
+    }
+
+    TouchArea {
+        clicked => {
+            root.clicked();
+        }
     }
 }

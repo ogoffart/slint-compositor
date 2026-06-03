@@ -577,7 +577,10 @@ impl Browser {
         });
 
         self.entries = list.iter().map(|e| e.path.clone()).collect();
-        self.sizes = list.iter().map(|e| if e.is_dir { 0 } else { e.len }).collect();
+        self.sizes = list
+            .iter()
+            .map(|e| if e.is_dir { 0 } else { e.len })
+            .collect();
         let rows: Vec<FileItem> = list
             .iter()
             .map(|e| FileItem {

@@ -1,0 +1,81 @@
+import { Theme } from "theme.slint";
+import { CalendarDay } from "types.slint";
+
+// A small month calendar shown when the panel clock is clicked. Dimming overlay
+// centred on screen; click the backdrop or press Escape to dismiss.
+export component CalendarPopover inherits Rectangle {
+    in property <string> title;
+    in property <[CalendarDay]> days;
+    callback dismiss();
+
+    background: Theme.overlay;
+    TouchArea {
+        clicked => {
+            root.dismiss();
+        }
+    }
+
+    Rectangle {
+        width: 264px;
+        height: layout.preferred-height;
+        background: Theme.bg;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Theme.hover;
+
+        TouchArea {}
+
+        layout := VerticalLayout {
+            padding: 14px;
+            spacing: 8px;
+
+            Text {
+                text: root.title;
+                color: Theme.fg;
+                font-size: 15px;
+                font-weight: 700;
+                horizontal-alignment: center;
+            }
+
+            GridLayout {
+                spacing: 3px;
+                for h[i] in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]: Text {
+                    row: 0;
+                    col: i;
+                    text: h;
+                    color: Theme.subtext;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                for d[i] in root.days: Rectangle {
+                    row: floor(i / 7) + 1;
+                    col: Math.mod(i, 7);
+                    min-width: 30px;
+                    min-height: 28px;
+                    border-radius: 6px;
+                    background: d.today ? Theme.accent : transparent;
+                    Text {
+                        text: d.day == 0 ? "" : "\{d.day}";
+                        color: d.today ? Theme.bg : Theme.fg;
+                        font-size: 12px;
+                        font-weight: d.today ? 700 : 400;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    forward-focus: fs;
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Escape {
+                root.dismiss();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

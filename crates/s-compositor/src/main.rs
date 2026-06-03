@@ -10,9 +10,10 @@ use std::rc::Rc;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
-use chrono::Local;
+use chrono::{Datelike, Local};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
+mod calendar;
 mod config;
 mod file_dialog;
 mod gl_bridge;
@@ -595,14 +596,34 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Clock: refresh once a second.
+    // Clock + calendar: refresh once a second.
+    let calendar_model = Rc::new(VecModel::<CalendarDay>::default());
+    desktop.set_calendar_days(ModelRc::from(calendar_model.clone()));
     let update_clock = {
         let weak = desktop.as_weak();
+        let calendar_model = calendar_model.clone();
+        let last_day = RefCell::new(0u32);
         move || {
             if let Some(d) = weak.upgrade() {
-                let (hours, minutes) = s_compositor_shell::format_clock(Local::now());
+                let now = Local::now();
+                let (hours, minutes) = s_compositor_shell::format_clock(now);
                 d.set_clock_hours(hours.into());
                 d.set_clock_minutes(minutes.into());
+                // Rebuild the month grid only when the day changes.
+                if *last_day.borrow() != now.day() {
+                    *last_day.borrow_mut() = now.day();
+                    let (title, cells) = calendar::month_grid(now);
+                    d.set_calendar_title(title.into());
+                    calendar_model.set_vec(
+                        cells
+                            .into_iter()
+                            .map(|c| CalendarDay {
+                                day: c.day as i32,
+                                today: c.today,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                }
             }
         }
     };

@@ -64,6 +64,12 @@ export struct TrayIcon {
     icon: image,
 }
 
+// One cell of the calendar popover's month grid (`day == 0` is a blank filler).
+export struct CalendarDay {
+    day: int,
+    today: bool,
+}
+
 // An on-screen notification popup.
 export struct Notification {
     id: int,

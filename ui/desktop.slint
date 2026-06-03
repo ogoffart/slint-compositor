@@ -5,10 +5,11 @@ import { StartMenu } from "start_menu.slint";
 import { LockScreen } from "lock_screen.slint";
 import { QuickSettings } from "quick_settings.slint";
 import { Notifications } from "notifications.slint";
+import { CalendarPopover } from "calendar.slint";
 import { Settings } from "settings.slint";
 import { FileDialog } from "file_dialog.slint";
-import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification } from "types.slint";
-export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification }
+import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification, CalendarDay } from "types.slint";
+export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification, CalendarDay }
 export { Theme }
 
 // Server-side decoration + input routing for one client window.
@@ -253,6 +254,11 @@ export component Desktop inherits Window {
     in property <[Notification]> notifications;
     callback dismiss-notification(int);
 
+    // Calendar popover (toggled from the panel clock).
+    in-out property <bool> calendar-visible: false;
+    in property <string> calendar-title;
+    in property <[CalendarDay]> calendar-days;
+
     // Start menu + lock screen.
     in property <[MenuEntry]> menu-entries;
     in-out property <bool> locked: false;
@@ -449,6 +455,9 @@ export component Desktop inherits Window {
         toggle-quick-settings => {
             root.quick-settings-visible = !root.quick-settings-visible;
         }
+        toggle-calendar => {
+            root.calendar-visible = !root.calendar-visible;
+        }
         activate(id) => {
             root.activate-window(id);
         }
@@ -582,6 +591,18 @@ export component Desktop inherits Window {
         }
         dismiss => {
             root.quick-settings-visible = false;
+        }
+    }
+
+    if root.calendar-visible: CalendarPopover {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        title: root.calendar-title;
+        days: root.calendar-days;
+        dismiss => {
+            root.calendar-visible = false;
         }
     }
 

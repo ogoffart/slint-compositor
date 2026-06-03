@@ -267,7 +267,31 @@ fn main() {
     );
     ui.set_notifications(Rc::new(slint::VecModel::default()).into());
 
-    // 7. Lock screen.
+    // 7. Calendar popover (June 2026: starts Monday, today = 15).
+    let mut days: Vec<CalendarDay> = (1..=30)
+        .map(|d| CalendarDay {
+            day: d,
+            today: d == 15,
+        })
+        .collect();
+    while days.len() < 42 {
+        days.push(CalendarDay {
+            day: 0,
+            today: false,
+        });
+    }
+    ui.set_calendar_title("June 2026".into());
+    ui.set_calendar_days(Rc::new(slint::VecModel::from(days)).into());
+    ui.set_calendar_visible(true);
+    save(
+        &ui,
+        &window,
+        PhysicalSize::new(1100, 720),
+        "shot_calendar.png",
+    );
+    ui.set_calendar_visible(false);
+
+    // 8. Lock screen.
     ui.set_lock_has_password(true);
     ui.set_locked(true);
     save(&ui, &window, PhysicalSize::new(1100, 720), "shot_lock.png");
