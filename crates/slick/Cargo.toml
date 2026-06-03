@@ -1,0 +1,25 @@
+[package]
+name = "slick"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+default-run = "slick"
+
+[[bin]]
+name = "slick"
+path = "src/main.rs"
+
+[dependencies]
+slick-wayland.workspace = true
+slick-shell.workspace = true
+slick-render.workspace = true
+slick-tray.workspace = true
+slint.workspace = true
+chrono.workspace = true
+log.workspace = true
+env_logger.workspace = true
+anyhow.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true

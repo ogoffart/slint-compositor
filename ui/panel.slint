@@ -1,0 +1,31 @@
+import { Clock } from "clock.slint";
+
+// The right-edge panel: clock on top, taskbar in the middle (M4),
+// system tray at the bottom (M6).
+export component Panel inherits Rectangle {
+    in property <string> clock-time;
+
+    width: 56px;
+    background: #11111b;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 12px;
+
+        Clock {
+            time: root.clock-time;
+        }
+
+        // Taskbar region — populated from live windows in M4.
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        // System tray placeholder — wired to SNI in M6.
+        Text {
+            text: "•••";
+            color: #6c7086;
+            horizontal-alignment: center;
+        }
+    }
+}

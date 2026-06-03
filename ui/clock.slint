@@ -1,0 +1,14 @@
+// Panel clock: shows the time stacked as "HH" over "MM".
+export component Clock inherits Rectangle {
+    in property <string> time;
+    height: label.preferred-height;
+
+    label := Text {
+        text: root.time;
+        color: #cdd6f4;
+        font-size: 18px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+}

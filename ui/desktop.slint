@@ -1,0 +1,19 @@
+import { Panel } from "panel.slint";
+
+// Root scene. In later milestones the area left of the panel becomes the
+// composited client-window layer (Slint `Image`s backed by GL textures).
+export component Desktop inherits Window {
+    in property <string> clock-time;
+
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    title: "slick";
+    background: #1e1e2e;
+
+    Panel {
+        clock-time: root.clock-time;
+        x: parent.width - self.width;
+        y: 0;
+        height: parent.height;
+    }
+}
