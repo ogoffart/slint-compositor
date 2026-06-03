@@ -1,7 +1,9 @@
 import { Button } from "std-widgets.slint";
 
-// A small settings dialog. For now it just lets you change the background.
+// A small settings dialog: panel placement/size and the background image.
 export component Settings inherits Rectangle {
+    in-out property <int> panel-edge;     // 0=Right 1=Left 2=Top 3=Bottom
+    in-out property <length> panel-size;
     callback change-background();
     callback close();
 
@@ -14,8 +16,8 @@ export component Settings inherits Rectangle {
     }
 
     Rectangle {
-        width: 400px;
-        height: 200px;
+        width: 460px;
+        height: 320px;
         background: #1e1e2e;
         border-radius: 10px;
         border-width: 1px;
@@ -34,6 +36,69 @@ export component Settings inherits Rectangle {
                 font-weight: 700;
             }
 
+            // Panel edge.
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: "Panel edge";
+                    color: #cdd6f4;
+                    vertical-alignment: center;
+                    width: 110px;
+                }
+                edge-btn := HorizontalLayout {
+                    spacing: 6px;
+                    horizontal-stretch: 1;
+                    for label[i] in ["Right", "Left", "Top", "Bottom"]: Rectangle {
+                        height: 30px;
+                        border-radius: 6px;
+                        background: root.panel-edge == i ? #585b70 : #313244;
+                        Text {
+                            text: label;
+                            color: #cdd6f4;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea {
+                            clicked => {
+                                root.panel-edge = i;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Panel size.
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: "Panel size";
+                    color: #cdd6f4;
+                    vertical-alignment: center;
+                    width: 110px;
+                }
+                Button {
+                    text: "−";
+                    clicked => {
+                        root.panel-size = max(40px, root.panel-size - 8px);
+                    }
+                }
+                Text {
+                    text: round(root.panel-size / 1px) + " px";
+                    color: #cdd6f4;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    width: 70px;
+                }
+                Button {
+                    text: "+";
+                    clicked => {
+                        root.panel-size = min(240px, root.panel-size + 8px);
+                    }
+                }
+            }
+
+            // Background.
             HorizontalLayout {
                 spacing: 10px;
                 Text {

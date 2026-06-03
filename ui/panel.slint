@@ -1,100 +1,118 @@
 import { Clock } from "clock.slint";
 import { WindowTile } from "types.slint";
 
-// The right-edge panel: launcher button + clock on top, taskbar in the middle,
-// system tray at the bottom (M6).
+// A single icon button in the panel.
+component PanelButton inherits Rectangle {
+    in property <string> icon;
+    in property <color> icon-color: #cdd6f4;
+    callback clicked();
+    border-radius: 8px;
+    background: ta.has-hover ? #313244 : #181825;
+    Text {
+        text: root.icon;
+        color: root.icon-color;
+        font-size: 18px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// A taskbar entry for one window.
+component TaskItem inherits Rectangle {
+    in property <WindowTile> tile;
+    callback activate();
+    border-radius: 6px;
+    background: tile.focused ? #585b70 : (a.has-hover ? #313244 : #181825);
+    Text {
+        text: tile.title == "" ? "?" : tile.title;
+        color: #cdd6f4;
+        font-size: 11px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+        width: parent.width - 8px;
+    }
+    a := TouchArea {
+        clicked => {
+            root.activate();
+        }
+    }
+}
+
+// The shell panel. Lays its content out along its long axis: vertically when
+// docked left/right, horizontally when docked top/bottom.
 export component Panel inherits Rectangle {
-    in property <string> clock-time;
+    in property <bool> horizontal;
     in property <[WindowTile]> windows;
+    in property <string> clock-time;
     callback toggle-launcher();
     callback toggle-settings();
     callback activate(int);
 
-    width: 56px;
     background: #11111b;
 
-    VerticalLayout {
+    if !root.horizontal: VerticalLayout {
         padding: 8px;
-        spacing: 12px;
-
-        // Launcher button.
-        Rectangle {
+        spacing: 10px;
+        PanelButton {
+            icon: "▶";
+            icon-color: #89b4fa;
             height: 40px;
-            border-radius: 8px;
-            background: launch-area.has-hover ? #313244 : #181825;
-            Text {
-                text: "▶";
-                color: #89b4fa;
-                font-size: 18px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            launch-area := TouchArea {
-                clicked => {
-                    root.toggle-launcher();
-                }
-            }
+            clicked => { root.toggle-launcher(); }
         }
-
-        // Settings button.
-        Rectangle {
+        PanelButton {
+            icon: "⚙";
+            icon-color: #f9e2af;
             height: 40px;
-            border-radius: 8px;
-            background: settings-area.has-hover ? #313244 : #181825;
-            Text {
-                text: "⚙";
-                color: #f9e2af;
-                font-size: 18px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            settings-area := TouchArea {
-                clicked => {
-                    root.toggle-settings();
-                }
-            }
+            clicked => { root.toggle-settings(); }
         }
-
-        Clock {
-            time: root.clock-time;
-        }
-
+        Clock { time: root.clock-time; }
         Rectangle { height: 1px; background: #313244; }
-
-        // Taskbar: one entry per open window.
         VerticalLayout {
-            spacing: 6px;
             vertical-stretch: 1;
+            spacing: 6px;
             alignment: start;
-
-            for win in root.windows: Rectangle {
+            for win in root.windows: TaskItem {
+                tile: win;
                 height: 40px;
-                border-radius: 6px;
-                background: win.focused ? #585b70 : (item-area.has-hover ? #313244 : #181825);
-
-                Text {
-                    text: win.title == "" ? "?" : win.title;
-                    color: #cdd6f4;
-                    font-size: 11px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    width: parent.width - 6px;
-                }
-
-                item-area := TouchArea {
-                    clicked => {
-                        root.activate(win.id);
-                    }
-                }
+                activate => { root.activate(win.id); }
             }
         }
+        Text { text: "•••"; color: #6c7086; horizontal-alignment: center; }
+    }
 
-        // System tray placeholder (M6).
-        Text {
-            text: "•••";
-            color: #6c7086;
-            horizontal-alignment: center;
+    if root.horizontal: HorizontalLayout {
+        padding: 8px;
+        spacing: 10px;
+        PanelButton {
+            icon: "▶";
+            icon-color: #89b4fa;
+            width: 40px;
+            clicked => { root.toggle-launcher(); }
         }
+        PanelButton {
+            icon: "⚙";
+            icon-color: #f9e2af;
+            width: 40px;
+            clicked => { root.toggle-settings(); }
+        }
+        Clock { time: root.clock-time; }
+        Rectangle { width: 1px; background: #313244; }
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            spacing: 6px;
+            alignment: start;
+            for win in root.windows: TaskItem {
+                tile: win;
+                width: 110px;
+                activate => { root.activate(win.id); }
+            }
+        }
+        Text { text: "•••"; color: #6c7086; vertical-alignment: center; }
     }
 }
