@@ -1,5 +1,3 @@
-# slick
-
 A Wayland desktop shell written in Rust, using [Slint](https://slint.dev) for the
 UI and [Smithay](https://smithay.github.io/) for the Wayland protocol.
 
