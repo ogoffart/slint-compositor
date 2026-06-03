@@ -7,19 +7,38 @@
 //! independent binary.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::SystemTime;
 
 use slint::{Model, VecModel};
 
 use crate::ops;
 use crate::{FileItem, Files};
 
+/// One directory entry, cached unsorted so re-sorting and toggling hidden files
+/// don't re-read the filesystem.
+#[derive(Clone)]
+struct Entry {
+    name: String,
+    path: PathBuf,
+    is_dir: bool,
+    kind: &'static str,
+    len: u64,
+    mtime: Option<SystemTime>,
+    size_str: String,
+    modified_str: String,
+    thumb: slint::Image,
+}
+
 pub struct Browser {
     weak: slint::Weak<Files>,
     items: Rc<VecModel<FileItem>>,
     cwd: PathBuf,
-    /// Full path for each row currently shown.
+    /// Unsorted, unfiltered cache of the current directory.
+    raw: Vec<Entry>,
+    /// Visible paths in display order (parallel to the model rows).
     entries: Vec<PathBuf>,
     /// Directories visited, for the Back button.
     history: Vec<PathBuf>,
@@ -32,6 +51,11 @@ pub struct Browser {
     /// Pending cut/copy: the paths and whether this is a move.
     clipboard: Vec<PathBuf>,
     clip_cut: bool,
+    /// Sort column (0 name, 1 size, 2 modified, 3 type) and direction.
+    sort_key: i32,
+    sort_desc: bool,
+    /// Whether dotfiles are shown.
+    show_hidden: bool,
 }
 
 /// A shared, reference-counted browser.
@@ -43,6 +67,7 @@ impl Browser {
             weak,
             items,
             cwd: PathBuf::from("/"),
+            raw: Vec::new(),
             entries: Vec::new(),
             history: Vec::new(),
             marks: Vec::new(),
@@ -50,7 +75,32 @@ impl Browser {
             anchor: -1,
             clipboard: Vec::new(),
             clip_cut: false,
+            sort_key: 0,
+            sort_desc: false,
+            show_hidden: false,
         }
+    }
+
+    /// Navigate to an arbitrary path (used by the Places sidebar).
+    pub fn go_to(&mut self, path: &str) {
+        self.navigate(PathBuf::from(path));
+    }
+
+    /// Set the sort column; clicking the active column again flips direction.
+    pub fn set_sort(&mut self, key: i32) {
+        if key == self.sort_key {
+            self.sort_desc = !self.sort_desc;
+        } else {
+            self.sort_key = key;
+            self.sort_desc = false;
+        }
+        self.render(true);
+    }
+
+    /// Show or hide dotfiles (re-filters the cache; no disk re-read).
+    pub fn toggle_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+        self.render(true);
     }
 
     /// Enter `dir`, pushing the current directory onto the back-history.
@@ -365,8 +415,8 @@ impl Browser {
         }
     }
 
-    /// List `dir` into the model (without touching history). Returns whether the
-    /// directory was readable.
+    /// Read `dir` into the unsorted cache (without touching history), then render
+    /// it. Returns whether the directory was readable.
     fn list(&mut self, dir: PathBuf) -> bool {
         let dir = if dir.is_dir() {
             dir
@@ -374,67 +424,123 @@ impl Browser {
             PathBuf::from("/")
         };
         self.cwd = std::fs::canonicalize(&dir).unwrap_or(dir);
-        self.entries.clear();
+        self.raw.clear();
 
-        let (mut dirs, mut files) = (Vec::new(), Vec::new());
         let readable = std::fs::read_dir(&self.cwd).is_ok();
         if let Ok(read) = std::fs::read_dir(&self.cwd) {
             for entry in read.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') {
-                    continue;
-                }
                 let path = entry.path();
-                if path.is_dir() {
-                    dirs.push((name, path));
+                let is_dir = path.is_dir();
+                let kind = file_kind(&path, is_dir);
+                let meta = std::fs::metadata(&path).ok();
+                let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                let mtime = meta.as_ref().and_then(|m| m.modified().ok());
+                let size_str = if is_dir {
+                    "—".to_string()
                 } else {
-                    files.push((name, path));
-                }
+                    meta.as_ref().map(|m| human_size(m.len())).unwrap_or_default()
+                };
+                let modified_str = mtime.map(format_time).unwrap_or_default();
+                // A thumbnail for image files (skip very large ones to stay snappy).
+                let thumb = if is_image(&path) && len < 8 << 20 {
+                    slint::Image::load_from_path(&path).unwrap_or_default()
+                } else {
+                    slint::Image::default()
+                };
+                self.raw.push(Entry {
+                    name,
+                    path,
+                    is_dir,
+                    kind,
+                    len,
+                    mtime,
+                    size_str,
+                    modified_str,
+                    thumb,
+                });
             }
         }
-        dirs.sort_by_key(|(n, _)| n.to_lowercase());
-        files.sort_by_key(|(n, _)| n.to_lowercase());
+        self.render(false);
+        readable
+    }
 
-        let mut rows = Vec::with_capacity(dirs.len() + files.len());
-        for (name, path) in dirs.into_iter().chain(files) {
-            let is_dir = path.is_dir();
-            let kind = file_kind(&path, is_dir);
-            let meta = std::fs::metadata(&path).ok();
-            let size = if is_dir {
-                "—".to_string()
-            } else {
-                meta.as_ref()
-                    .map(|m| human_size(m.len()))
-                    .unwrap_or_default()
+    /// Sort and filter the cache into the model. With `preserve`, the selection
+    /// is carried over by path; otherwise the first entry is selected.
+    fn render(&mut self, preserve: bool) {
+        let prev_selected: HashSet<PathBuf> = if preserve {
+            self.entries
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| self.marks.get(*i).copied().unwrap_or(false))
+                .map(|(_, p)| p.clone())
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        let prev_cursor = if preserve && self.cursor >= 0 {
+            self.entries.get(self.cursor as usize).cloned()
+        } else {
+            None
+        };
+
+        let mut list: Vec<Entry> = self
+            .raw
+            .iter()
+            .filter(|e| self.show_hidden || !e.name.starts_with('.'))
+            .cloned()
+            .collect();
+        let key = self.sort_key;
+        list.sort_by(|a, b| {
+            // Folders always come first, regardless of column or direction.
+            if a.is_dir != b.is_dir {
+                return if a.is_dir {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                };
+            }
+            let ord = match key {
+                1 => a.len.cmp(&b.len),
+                2 => a.mtime.cmp(&b.mtime),
+                3 => a.kind.cmp(b.kind).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             };
-            let modified = meta
-                .as_ref()
-                .and_then(|m| m.modified().ok())
-                .map(format_time)
-                .unwrap_or_default();
-            // A thumbnail for image files (skip very large ones to stay snappy).
-            let thumb = if is_image(&path) && meta.as_ref().map_or(false, |m| m.len() < 8 << 20) {
-                slint::Image::load_from_path(&path).unwrap_or_default()
+            if self.sort_desc {
+                ord.reverse()
             } else {
-                slint::Image::default()
-            };
-            self.entries.push(path);
-            rows.push(FileItem {
-                name: name.into(),
-                is_dir,
-                kind: kind.into(),
-                size: size.into(),
-                modified: modified.into(),
-                thumb,
+                ord
+            }
+        });
+
+        self.entries = list.iter().map(|e| e.path.clone()).collect();
+        let rows: Vec<FileItem> = list
+            .iter()
+            .map(|e| FileItem {
+                name: e.name.clone().into(),
+                is_dir: e.is_dir,
+                kind: e.kind.into(),
+                size: e.size_str.clone().into(),
+                modified: e.modified_str.clone().into(),
+                thumb: e.thumb.clone(),
                 selected: false,
-            });
-        }
+            })
+            .collect();
         self.items.set_vec(rows);
 
-        // Reset selection: pre-select the first entry so the keyboard and preview
-        // work immediately on entering a directory.
         self.marks = vec![false; self.entries.len()];
-        if self.entries.is_empty() {
+        if preserve {
+            for (i, p) in self.entries.iter().enumerate() {
+                if prev_selected.contains(p) {
+                    self.marks[i] = true;
+                }
+            }
+            self.cursor = prev_cursor
+                .and_then(|cp| self.entries.iter().position(|p| *p == cp))
+                .map(|i| i as i32)
+                .unwrap_or(if self.entries.is_empty() { -1 } else { 0 });
+            self.anchor = self.cursor;
+        } else if self.entries.is_empty() {
             self.cursor = -1;
             self.anchor = -1;
         } else {
@@ -446,9 +552,11 @@ impl Browser {
         if let Some(w) = self.weak.upgrade() {
             w.set_path(self.cwd.to_string_lossy().as_ref().into());
             w.set_window_title(format!("{} — Files", self.title_name()).into());
+            w.set_sort_key(self.sort_key);
+            w.set_sort_desc(self.sort_desc);
+            w.set_show_hidden(self.show_hidden);
         }
         self.sync();
-        readable
     }
 
     fn title_name(&self) -> String {
@@ -462,7 +570,11 @@ impl Browser {
 /// Launch a file with the system default handler, detached from this process.
 fn launch(path: &Path) {
     use std::process::{Command, Stdio};
-    let opener = if which("xdg-open") { "xdg-open" } else { "gio" };
+    let opener = if which("xdg-open") {
+        "xdg-open"
+    } else {
+        "gio"
+    };
     let mut cmd = Command::new(opener);
     if opener == "gio" {
         cmd.arg("open");
@@ -579,6 +691,21 @@ pub fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// Sidebar shortcuts: Home, the common XDG user directories that exist, and the
+/// filesystem root. Returned as (label, path) pairs.
+pub fn places() -> Vec<(String, String)> {
+    let home = home_dir();
+    let mut places = vec![("Home".to_string(), home.to_string_lossy().into_owned())];
+    for sub in ["Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"] {
+        let path = home.join(sub);
+        if path.is_dir() {
+            places.push((sub.to_string(), path.to_string_lossy().into_owned()));
+        }
+    }
+    places.push(("Filesystem".to_string(), "/".to_string()));
+    places
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,10 +718,7 @@ mod tests {
         assert_eq!(file_kind(Path::new("a.mp3"), false), "audio");
         assert_eq!(file_kind(Path::new("main.rs"), false), "code");
         assert_eq!(file_kind(Path::new("a.pdf"), false), "pdf");
-        assert_eq!(
-            file_kind(Path::new("/nonexistent/unknown.xyz"), false),
-            "file"
-        );
+        assert_eq!(file_kind(Path::new("/nonexistent/unknown.xyz"), false), "file");
     }
 
     #[test]
@@ -623,10 +747,7 @@ mod tests {
 
     fn scratch() -> PathBuf {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let n = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let dir = std::env::temp_dir().join(format!("sfiles-model-{n}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -646,10 +767,7 @@ mod tests {
         b.navigate(dir.clone()); // selects the only entry
         b.copy();
         b.paste();
-        assert_eq!(
-            std::fs::read_to_string(dir.join("a (copy).txt")).unwrap(),
-            "hello"
-        );
+        assert_eq!(std::fs::read_to_string(dir.join("a (copy).txt")).unwrap(), "hello");
         assert!(dir.join("a.txt").exists()); // original kept
     }
 
@@ -691,6 +809,69 @@ mod tests {
         b.trash();
         assert!(!dir.join("junk.txt").exists());
         assert!(dir.join("xdgdata/Trash/files/junk.txt").exists());
+    }
+
+    fn names(b: &Browser) -> Vec<String> {
+        b.entries
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn sorting_keeps_folders_first() {
+        let dir = scratch();
+        std::fs::create_dir(dir.join("zdir")).unwrap();
+        std::fs::write(dir.join("a.txt"), vec![0u8; 100]).unwrap();
+        std::fs::write(dir.join("b.txt"), vec![0u8; 1]).unwrap();
+        let mut b = headless();
+        b.navigate(dir.clone());
+        // Name ascending (default): folder first, then a, b.
+        assert_eq!(names(&b), ["zdir", "a.txt", "b.txt"]);
+        // Size ascending: folder first, then smaller file first.
+        b.set_sort(1);
+        assert_eq!(names(&b), ["zdir", "b.txt", "a.txt"]);
+        // Clicking Size again flips to descending.
+        b.set_sort(1);
+        assert_eq!(names(&b), ["zdir", "a.txt", "b.txt"]);
+        // Back to name descending.
+        b.set_sort(0);
+        b.set_sort(0);
+        assert_eq!(names(&b), ["zdir", "b.txt", "a.txt"]);
+    }
+
+    #[test]
+    fn hidden_files_toggle() {
+        let dir = scratch();
+        std::fs::write(dir.join(".secret"), "x").unwrap();
+        std::fs::write(dir.join("visible.txt"), "x").unwrap();
+        let mut b = headless();
+        b.navigate(dir.clone());
+        assert_eq!(names(&b), ["visible.txt"]);
+        b.toggle_hidden();
+        assert_eq!(names(&b), [".secret", "visible.txt"]);
+        b.toggle_hidden();
+        assert_eq!(names(&b), ["visible.txt"]);
+    }
+
+    #[test]
+    fn sort_preserves_selection_by_path() {
+        let dir = scratch();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.join(n), "x").unwrap();
+        }
+        let mut b = headless();
+        b.navigate(dir.clone());
+        b.row_pressed(1, false, false); // select b.txt
+        assert_eq!(b.cursor, 1);
+        b.set_sort(0); // name descending -> c, b, a
+        assert_eq!(names(&b), ["c.txt", "b.txt", "a.txt"]);
+        // b.txt is still the cursor (now at index 1 by coincidence) and selected.
+        assert!(b.marks[b.cursor as usize]);
+        assert_eq!(
+            b.entries[b.cursor as usize].file_name().unwrap().to_string_lossy(),
+            "b.txt"
+        );
     }
 
     #[test]

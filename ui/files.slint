@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { FileItem } from "types.slint";
+import { FileItem, Place } from "types.slint";
 import { FileIcon } from "file_icon.slint";
 import { Button, ScrollView, LineEdit } from "std-widgets.slint";
 
@@ -44,6 +44,58 @@ component MenuRow inherits Rectangle {
     ta := TouchArea {
         enabled: root.enabled;
         clicked => { root.chosen(); }
+    }
+}
+
+// A clickable Places-sidebar shortcut.
+component PlaceRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback chosen;
+    height: 32px;
+    background: root.active ? Theme.accent : (ta.has-hover ? Theme.hover : transparent);
+    border-radius: 6px;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            FileIcon { width: 18px; height: 18px; is-dir: true; }
+        }
+        Text {
+            text: root.label;
+            color: root.active ? #ffffff : Theme.fg;
+            font-size: 13px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+    ta := TouchArea {
+        clicked => { root.chosen(); }
+    }
+}
+
+// A clickable details-view column header showing the active sort arrow.
+component HeaderCell inherits Rectangle {
+    in property <string> label;
+    in property <int> sort-col;
+    in property <int> active-key;
+    in property <bool> desc;
+    in property <bool> align-right;
+    callback clicked;
+    Text {
+        text: root.label + (root.active-key == root.sort-col ? (root.desc ? " ▼" : " ▲") : "");
+        color: root.active-key == root.sort-col ? Theme.fg : Theme.subtext;
+        font-size: 11px;
+        font-weight: 600;
+        vertical-alignment: center;
+        horizontal-alignment: root.align-right ? right : left;
+        width: 100%;
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
     }
 }
 
@@ -94,10 +146,18 @@ export component Files inherits Window {
     in property <bool> can-back;
     // 0 = icons, 1 = list + preview, 2 = details table.
     in-out property <int> view: 0;
+    // Sort column (0 name, 1 size, 2 modified, 3 type) + direction, and dotfiles.
+    in property <int> sort-key;
+    in property <bool> sort-desc;
+    in property <bool> show-hidden;
+    in property <[Place]> places;
 
     callback go-back();
     callback go-up();
     callback go-home();
+    callback go-to(string);
+    callback sort-by(int);
+    callback toggle-hidden();
     callback navigate-to(string);
     callback row-pressed(int, bool, bool);  // idx, ctrl, shift
     callback move-cursor(int, bool);        // delta, shift (extend)
@@ -208,6 +268,10 @@ export component Files inherits Window {
                 text: "New Folder";
                 clicked => { root.open-new-folder(); }
             }
+            Button {
+                text: root.show-hidden ? "Hidden ✓" : "Hidden";
+                clicked => { root.toggle-hidden(); keys.focus(); }
+            }
             Rectangle {
                 background: Theme.surface;
                 border-radius: 8px;
@@ -234,6 +298,7 @@ export component Files inherits Window {
         }
 
         keys := FocusScope {
+            vertical-stretch: 1;
             key-pressed(e) => {
                 // Operation shortcuts.
                 if (e.modifiers.control && (e.text == "c" || e.text == "C")) {
@@ -250,6 +315,10 @@ export component Files inherits Window {
                 }
                 if (e.modifiers.control && (e.text == "a" || e.text == "A")) {
                     root.select-all();
+                    return EventResult.accept;
+                }
+                if (e.modifiers.control && (e.text == "h" || e.text == "H")) {
+                    root.toggle-hidden();
                     return EventResult.accept;
                 }
                 if (e.text == Key.Delete) {
@@ -315,6 +384,32 @@ export component Files inherits Window {
             HorizontalLayout {
                 spacing: 10px;
 
+                // Places sidebar.
+                Rectangle {
+                    width: 168px;
+                    background: Theme.surface;
+                    border-radius: 8px;
+                    clip: true;
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 2px;
+                        alignment: start;
+                        Text {
+                            text: "Places";
+                            color: Theme.subtext;
+                            font-size: 11px;
+                            font-weight: 600;
+                            height: 22px;
+                            vertical-alignment: center;
+                        }
+                        for place[i] in root.places: PlaceRow {
+                            label: place.name;
+                            active: place.path == root.path;
+                            chosen => { root.go-to(place.path); keys.focus(); }
+                        }
+                    }
+                }
+
                 Rectangle {
                     horizontal-stretch: root.view == 1 ? 3 : 1;
                     background: Theme.surface;
@@ -328,38 +423,38 @@ export component Files inherits Window {
                                 padding-left: 12px;
                                 padding-right: 12px;
                                 spacing: 10px;
-                                Text {
-                                    text: "Name";
-                                    color: Theme.subtext;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
+                                HeaderCell {
+                                    label: "Name";
+                                    sort-col: 0;
+                                    active-key: root.sort-key;
+                                    desc: root.sort-desc;
                                     horizontal-stretch: 1;
+                                    clicked => { root.sort-by(0); }
                                 }
-                                Text {
-                                    text: "Size";
-                                    color: Theme.subtext;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: right;
+                                HeaderCell {
+                                    label: "Size";
+                                    sort-col: 1;
+                                    active-key: root.sort-key;
+                                    desc: root.sort-desc;
+                                    align-right: true;
                                     width: 90px;
+                                    clicked => { root.sort-by(1); }
                                 }
-                                Text {
-                                    text: "Modified";
-                                    color: Theme.subtext;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
+                                HeaderCell {
+                                    label: "Modified";
+                                    sort-col: 2;
+                                    active-key: root.sort-key;
+                                    desc: root.sort-desc;
                                     width: 150px;
+                                    clicked => { root.sort-by(2); }
                                 }
-                                Text {
-                                    text: "Type";
-                                    color: Theme.subtext;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
+                                HeaderCell {
+                                    label: "Type";
+                                    sort-col: 3;
+                                    active-key: root.sort-key;
+                                    desc: root.sort-desc;
                                     width: 70px;
+                                    clicked => { root.sort-by(3); }
                                 }
                             }
                         }
