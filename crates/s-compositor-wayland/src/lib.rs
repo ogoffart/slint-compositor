@@ -72,7 +72,23 @@ pub enum Event {
         pixels: Vec<u8>,
     },
     PopupRemoved(WindowId),
+    /// A layer-shell surface committed a frame, to be drawn at `(x, y)`.
+    /// `layer` is 0=background, 1=bottom, 2=top, 3=overlay.
+    LayerBuffer {
+        id: WindowId,
+        layer: u8,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
+    LayerRemoved(WindowId),
 }
+
+/// Output size in logical pixels, used to anchor layer-shell surfaces.
+pub const OUTPUT_W: i32 = 1280;
+pub const OUTPUT_H: i32 = 800;
 
 /// Commands sent from the UI thread to the compositor thread.
 #[derive(Debug, Clone)]
@@ -171,6 +187,24 @@ impl std::fmt::Debug for Event {
                 .field("height", height)
                 .finish(),
             Event::PopupRemoved(id) => f.debug_tuple("PopupRemoved").field(id).finish(),
+            Event::LayerBuffer {
+                id,
+                layer,
+                x,
+                y,
+                width,
+                height,
+                ..
+            } => f
+                .debug_struct("LayerBuffer")
+                .field("id", id)
+                .field("layer", layer)
+                .field("x", x)
+                .field("y", y)
+                .field("width", width)
+                .field("height", height)
+                .finish(),
+            Event::LayerRemoved(id) => f.debug_tuple("LayerRemoved").field(id).finish(),
         }
     }
 }
@@ -190,6 +224,8 @@ pub fn run(
     let xdg_shell_state = XdgShellState::new::<SlickState>(&dh);
     let xdg_decoration_state =
         smithay::wayland::shell::xdg::decoration::XdgDecorationState::new::<SlickState>(&dh);
+    let layer_shell_state =
+        smithay::wayland::shell::wlr_layer::WlrLayerShellState::new::<SlickState>(&dh);
     let shm_state = ShmState::new::<SlickState>(&dh, Vec::new());
     let output_manager_state = OutputManagerState::new_with_xdg_output::<SlickState>(&dh);
     let mut seat_state = SeatState::<SlickState>::new();
@@ -213,7 +249,7 @@ pub fn run(
     );
     output.create_global::<SlickState>(&dh);
     let mode = smithay::output::Mode {
-        size: (1280, 720).into(),
+        size: (OUTPUT_W, OUTPUT_H).into(),
         refresh: 60_000,
     };
     output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
@@ -225,6 +261,7 @@ pub fn run(
         compositor_state,
         xdg_shell_state,
         xdg_decoration_state,
+        layer_shell_state,
         shm_state,
         output_manager_state,
         seat_state,
@@ -235,6 +272,7 @@ pub fn run(
         next_window_id: 0,
         windows: std::collections::HashMap::new(),
         popups: std::collections::HashMap::new(),
+        layer_surfaces: std::collections::HashMap::new(),
         start_time: std::time::Instant::now(),
         pending_callbacks: Vec::new(),
         events: events.clone(),

@@ -8,6 +8,18 @@ export struct PopupTile {
     height: length,
 }
 
+// A layer-shell surface (wallpaper/bar/notification). `layer`: 0=background,
+// 1=bottom, 2=top, 3=overlay.
+export struct LayerTile {
+    id: int,
+    texture: image,
+    layer: int,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
+
 // An entry in the file dialog's current directory.
 export struct FileItem {
     name: string,

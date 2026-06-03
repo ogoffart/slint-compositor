@@ -9,6 +9,7 @@
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_callback::WlCallback;
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Client;
@@ -18,11 +19,15 @@ use smithay::wayland::compositor::{
     SurfaceAttributes,
 };
 use smithay::wayland::output::OutputHandler;
+use smithay::wayland::shell::wlr_layer::{
+    Anchor, Layer, LayerSurface, LayerSurfaceCachedState, Margins, WlrLayerShellHandler,
+    WlrLayerShellState,
+};
 use smithay::wayland::shm::{with_buffer_contents, BufferData};
 
 use s_compositor_render::{convert_to_rgba, ShmFormat};
 
-use crate::state::{PopupEntry, WindowEntry};
+use crate::state::{LayerEntry, PopupEntry, WindowEntry};
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
 };
@@ -92,8 +97,57 @@ impl CompositorHandler for SlickState {
                     pixels,
                 });
             }
+            return;
+        }
+
+        // Layer-shell surface (bar, wallpaper, notification)?
+        if let Some(entry) = self.layer_surfaces.get(surface) {
+            let (id, layer) = (entry.id, entry.layer);
+            let buffer = extract_buffer(surface, &mut callbacks);
+            self.pending_callbacks.append(&mut callbacks);
+            if let Some((width, height, pixels)) = buffer {
+                let (anchor, margin) = with_states(surface, |states| {
+                    let mut guard = states.cached_state.get::<LayerSurfaceCachedState>();
+                    let state = guard.current();
+                    (state.anchor, state.margin)
+                });
+                let (x, y) = layer_position(anchor, margin, width as i32, height as i32);
+                let _ = self.events.send(Event::LayerBuffer {
+                    id,
+                    layer: layer_to_u8(layer),
+                    x,
+                    y,
+                    width,
+                    height,
+                    pixels,
+                });
+            }
         }
     }
+}
+
+fn layer_to_u8(layer: Layer) -> u8 {
+    match layer {
+        Layer::Background => 0,
+        Layer::Bottom => 1,
+        Layer::Top => 2,
+        Layer::Overlay => 3,
+    }
+}
+
+/// Position a layer surface against the output edges per its anchors+margins.
+fn layer_position(anchor: Anchor, margin: Margins, w: i32, h: i32) -> (i32, i32) {
+    let x = if anchor.contains(Anchor::RIGHT) && !anchor.contains(Anchor::LEFT) {
+        crate::OUTPUT_W - w - margin.right
+    } else {
+        margin.left
+    };
+    let y = if anchor.contains(Anchor::BOTTOM) && !anchor.contains(Anchor::TOP) {
+        crate::OUTPUT_H - h - margin.bottom
+    } else {
+        margin.top
+    };
+    (x, y)
 }
 
 /// Drain the surface's frame callbacks into `callbacks` and, if a new shm buffer
@@ -342,10 +396,60 @@ impl ServerDndGrabHandler for SlickState {}
 
 impl OutputHandler for SlickState {}
 
+impl WlrLayerShellHandler for SlickState {
+    fn shell_state(&mut self) -> &mut WlrLayerShellState {
+        &mut self.layer_shell_state
+    }
+
+    fn new_layer_surface(
+        &mut self,
+        surface: LayerSurface,
+        _output: Option<WlOutput>,
+        layer: Layer,
+        _namespace: String,
+    ) {
+        // Size the surface from its requested size, filling 0 dimensions.
+        let desired = with_states(surface.wl_surface(), |states| {
+            states
+                .cached_state
+                .get::<LayerSurfaceCachedState>()
+                .current()
+                .size
+        });
+        let w = if desired.w > 0 {
+            desired.w
+        } else {
+            crate::OUTPUT_W
+        };
+        let h = if desired.h > 0 {
+            desired.h
+        } else {
+            crate::OUTPUT_H
+        };
+        surface.with_pending_state(|state| {
+            state.size = Some((w, h).into());
+        });
+        surface.send_configure();
+
+        let id = self.allocate_window_id();
+        let wl = surface.wl_surface().clone();
+        self.layer_surfaces
+            .insert(wl, LayerEntry { id, surface, layer });
+        log::info!("new layer surface {id:?} ({layer:?}) {w}x{h}");
+    }
+
+    fn layer_destroyed(&mut self, surface: LayerSurface) {
+        if let Some(entry) = self.layer_surfaces.remove(surface.wl_surface()) {
+            let _ = self.events.send(Event::LayerRemoved(entry.id));
+        }
+    }
+}
+
 delegate_compositor!(SlickState);
 delegate_shm!(SlickState);
 delegate_xdg_shell!(SlickState);
 smithay::delegate_xdg_decoration!(SlickState);
+smithay::delegate_layer_shell!(SlickState);
 delegate_seat!(SlickState);
 delegate_output!(SlickState);
 delegate_data_device!(SlickState);
