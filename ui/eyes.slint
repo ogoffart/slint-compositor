@@ -35,14 +35,19 @@ export component Eyes inherits Rectangle {
     in property <length> cursor-x;
     in property <length> cursor-y;
 
+    // Keep the applet to its natural size so the panel layout can't stretch the
+    // eyes into tall bars.
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+
     HorizontalLayout {
         spacing: 4px;
         alignment: center;
         for i in 2: Eye {
             cursor-x: root.cursor-x;
             cursor-y: root.cursor-y;
-            preferred-width: 24px;
-            preferred-height: 30px;
+            width: 22px;
+            height: 26px;
         }
     }
 }

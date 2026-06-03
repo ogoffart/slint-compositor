@@ -26,3 +26,6 @@ async-channel = "2"
 
 [build-dependencies]
 slint-build.workspace = true
+
+[dev-dependencies]
+image = "0.25.10"
