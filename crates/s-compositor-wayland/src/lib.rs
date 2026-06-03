@@ -61,6 +61,17 @@ pub enum Event {
         /// Whether s-compositor should draw server-side decorations for this window.
         decorated: bool,
     },
+    /// A popup committed a frame, to be drawn at offset `(ox, oy)` from `parent`.
+    PopupBuffer {
+        id: WindowId,
+        parent: Option<WindowId>,
+        ox: i32,
+        oy: i32,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
+    PopupRemoved(WindowId),
 }
 
 /// Commands sent from the UI thread to the compositor thread.
@@ -90,6 +101,8 @@ pub enum Command {
         width: i32,
         height: i32,
     },
+    /// Dismiss all open popups (e.g. a click landed outside them).
+    DismissPopups,
 }
 
 /// Re-exported so the UI crate can hold the sending half.
@@ -144,6 +157,20 @@ impl std::fmt::Debug for Event {
                 .field("title", title)
                 .field("decorated", decorated)
                 .finish(),
+            Event::PopupBuffer {
+                id,
+                parent,
+                width,
+                height,
+                ..
+            } => f
+                .debug_struct("PopupBuffer")
+                .field("id", id)
+                .field("parent", parent)
+                .field("width", width)
+                .field("height", height)
+                .finish(),
+            Event::PopupRemoved(id) => f.debug_tuple("PopupRemoved").field(id).finish(),
         }
     }
 }
@@ -207,6 +234,7 @@ pub fn run(
         workspaces: Workspaces::new(WORKSPACE_COUNT),
         next_window_id: 0,
         windows: std::collections::HashMap::new(),
+        popups: std::collections::HashMap::new(),
         start_time: std::time::Instant::now(),
         pending_callbacks: Vec::new(),
         events: events.clone(),

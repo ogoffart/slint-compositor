@@ -21,9 +21,8 @@ use smithay::wayland::output::OutputHandler;
 use smithay::wayland::shm::{with_buffer_contents, BufferData};
 
 use s_compositor_render::{convert_to_rgba, ShmFormat};
-use s_compositor_shell::WindowId;
 
-use crate::state::WindowEntry;
+use crate::state::{PopupEntry, WindowEntry};
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
 };
@@ -56,37 +55,54 @@ impl CompositorHandler for SlickState {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        let Some(entry) = self.windows.get(surface) else {
-            return;
-        };
-        let id = entry.id;
-        let decorated = entry.decorated;
-
-        // Collect frame callbacks (fired later, throttled) and the new buffer.
         let mut callbacks = Vec::new();
-        let buffer_event = extract_commit(surface, id, decorated, &mut callbacks);
-        self.pending_callbacks.append(&mut callbacks);
-        if let Some(event) = buffer_event {
-            let _ = self.events.send(event);
+
+        // Toplevel window?
+        if let Some(entry) = self.windows.get(surface) {
+            let (id, decorated) = (entry.id, entry.decorated);
+            let buffer = extract_buffer(surface, &mut callbacks);
+            let title = read_title(surface);
+            self.pending_callbacks.append(&mut callbacks);
+            if let Some((width, height, pixels)) = buffer {
+                let _ = self.events.send(Event::WindowBuffer {
+                    id,
+                    width,
+                    height,
+                    pixels,
+                    title,
+                    decorated,
+                });
+            }
+            return;
+        }
+
+        // Popup (menu, dropdown, tooltip)?
+        if let Some(entry) = self.popups.get(surface) {
+            let (id, parent, offset) = (entry.id, entry.parent_id, entry.offset);
+            let buffer = extract_buffer(surface, &mut callbacks);
+            self.pending_callbacks.append(&mut callbacks);
+            if let Some((width, height, pixels)) = buffer {
+                let _ = self.events.send(Event::PopupBuffer {
+                    id,
+                    parent,
+                    ox: offset.0,
+                    oy: offset.1,
+                    width,
+                    height,
+                    pixels,
+                });
+            }
         }
     }
 }
 
-/// Drain the surface's pending frame callbacks into `callbacks`, and, if a new
-/// shm buffer was attached, copy its pixels into a `WindowBuffer` event.
-fn extract_commit(
+/// Drain the surface's frame callbacks into `callbacks` and, if a new shm buffer
+/// was attached, copy its pixels out as tightly-packed RGBA8.
+fn extract_buffer(
     surface: &WlSurface,
-    id: WindowId,
-    decorated: bool,
     callbacks: &mut Vec<WlCallback>,
-) -> Option<Event> {
+) -> Option<(u32, u32, Vec<u8>)> {
     with_states(surface, |states| {
-        let title = states
-            .data_map
-            .get::<XdgToplevelSurfaceData>()
-            .and_then(|d| d.lock().unwrap().title.clone())
-            .unwrap_or_default();
-
         let mut guard = states.cached_state.get::<SurfaceAttributes>();
         let attrs = guard.current();
 
@@ -99,28 +115,31 @@ fn extract_commit(
         };
 
         let result = with_buffer_contents(&buffer, read_shm);
-        // shm contents are copied within the callback; release the buffer so the
-        // client can reuse it.
+        // shm contents are copied within the callback; release for reuse.
         buffer.release();
 
         match result {
-            Ok(Some((width, height, pixels))) => Some(Event::WindowBuffer {
-                id,
-                width,
-                height,
-                pixels,
-                title,
-                decorated,
-            }),
+            Ok(Some(frame)) => Some(frame),
             Ok(None) => {
-                log::debug!("window {id:?}: unsupported shm format");
+                log::debug!("unsupported shm format");
                 None
             }
             Err(err) => {
-                log::debug!("window {id:?}: non-shm buffer ({err:?})");
+                log::debug!("non-shm buffer ({err:?})");
                 None
             }
         }
+    })
+}
+
+/// Read the toplevel title from a surface's xdg state.
+fn read_title(surface: &WlSurface) -> String {
+    with_states(surface, |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().unwrap().title.clone())
+            .unwrap_or_default()
     })
 }
 
@@ -193,7 +212,37 @@ impl XdgShellHandler for SlickState {
         }
     }
 
-    fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {}
+    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+        let geometry = positioner.get_geometry();
+        surface.with_pending_state(|state| {
+            state.geometry = geometry;
+        });
+        let _ = surface.send_configure();
+
+        let parent_id = surface
+            .get_parent_surface()
+            .and_then(|parent| self.id_of_surface(&parent));
+        let id = self.allocate_window_id();
+        self.popups.insert(
+            surface.wl_surface().clone(),
+            PopupEntry {
+                id,
+                popup: surface,
+                parent_id,
+                offset: (geometry.loc.x, geometry.loc.y),
+            },
+        );
+        log::info!(
+            "new popup {id:?} (parent {parent_id:?}) at {:?}",
+            geometry.loc
+        );
+    }
+
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        if let Some(entry) = self.popups.remove(surface.wl_surface()) {
+            let _ = self.events.send(Event::PopupRemoved(entry.id));
+        }
+    }
 
     fn grab(
         &mut self,
