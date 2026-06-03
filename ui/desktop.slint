@@ -40,6 +40,17 @@ component WindowFrame inherits Rectangle {
             height: 28px;
             background: tile.focused ? Theme.hover : Theme.surface;
 
+            // Drag the title bar to move the window. Sits beneath the buttons so
+            // their TouchAreas (declared after) receive their own clicks.
+            drag := TouchArea {
+                width: 100%;
+                height: 100%;
+                mouse-cursor: move;
+                moved => {
+                    root.moved(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+            }
+
             HorizontalLayout {
                 padding-left: 8px;
                 padding-right: 4px;
@@ -110,16 +121,6 @@ component WindowFrame inherits Rectangle {
                             root.close();
                         }
                     }
-                }
-            }
-
-            // Drag the title bar (left of the close button) to move the window.
-            drag := TouchArea {
-                width: parent.width - 28px;
-                height: parent.height;
-                mouse-cursor: move;
-                moved => {
-                    root.moved(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
                 }
             }
         }
