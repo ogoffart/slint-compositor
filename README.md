@@ -36,7 +36,9 @@ desktop in one Slint scene graph.
 | `s-compositor-shell` | Plain-Rust data models (windows, workspaces, clock). |
 | `s-compositor-tray` | System tray (SNI) host — stub for now. |
 
-The Slint UI lives in `ui/` (`desktop.slint`, `panel.slint`, `clock.slint`).
+The Slint UI lives in `ui/` (`desktop.slint`, `panel.slint`, `clock.slint`,
+`eyes.slint`, `settings.slint`, `launcher.slint`, `file_dialog.slint`,
+`theme.slint`).
 
 ## Status
 
@@ -52,7 +54,9 @@ Working today (verified nested under Xvfb + llvmpipe):
   draws the title bar (title, minimize/maximize/close) and border itself.
 - **Input**: pointer and keyboard are forwarded to the focused client; windows
   can be moved (title-bar drag), resized (corner grip), maximized and minimized.
-- A panel dockable to any edge (configurable size) with a live clock, a
+- A panel dockable to any edge (configurable size) with a live clock that shows
+  `HH:MM` on one line when the panel is wide enough and stacks to two lines when
+  it is narrow, an **xeyes-style applet** whose pupils follow the pointer, a
   **command launcher** (▶), a **taskbar**, and a **settings** button (⚙).
 - **Theming**: accent colour and light/dark scheme, **persisted** to
   `s-compositor.conf` in the working directory and **published over the XDG
@@ -86,19 +90,70 @@ gdbus call --session --dest org.freedesktop.impl.portal.desktop.scompositor \
 # => (uint32 0, {'uris': <['file:///path/to/chosen']>})
 ```
 
-## Building & running
+## Building & running (for humans)
+
+### System prerequisites
+
+You need a Rust toolchain (stable, install via [rustup](https://rustup.rs)) and a
+few system libraries. The renderer is Skia (built from source by `skia-bindings`,
+which needs a C/C++ toolchain), and the seat/keymap handling needs `libxkbcommon`.
+
+On Debian/Ubuntu:
+
+```sh
+sudo apt install build-essential clang libxkbcommon-dev libfontconfig-1-dev
+```
+
+> **Note:** the linker needs the `libxkbcommon.so` *development* symlink, not just
+> the runtime `libxkbcommon.so.0`. If you see `error: unable to find library
+> -lxkbcommon` at link time, install `libxkbcommon-dev` (the command above) — or,
+> if only the runtime lib is present, symlink it:
+> `sudo ln -s libxkbcommon.so.0 /usr/lib/x86_64-linux-gnu/libxkbcommon.so`.
+
+### Build & run
 
 ```sh
 cargo build
-cargo test          # pure-logic unit tests (no display needed)
-cargo run -p s-compositor  # requires a display (runs nested under your X11/Wayland session)
+cargo run -p s-compositor   # runs nested inside your current X11/Wayland session
 ```
 
-Once running, it prints the `WAYLAND_DISPLAY` it created; point a client at it:
+`cargo run` opens a window for the shell. It then prints the `WAYLAND_DISPLAY` it
+created; point a Wayland client at that socket to see it composited:
 
 ```sh
 WAYLAND_DISPLAY=wayland-1 foot
 ```
+
+Settings (panel edge/size, theme, accent, background) are reachable from the ⚙
+button and persisted to `s-compositor.conf` in the working directory.
+
+## Testing (for agents / CI)
+
+Two layers of verification work **without a display or GPU**:
+
+**1. Unit tests** — pure-logic models (windows, clock formatting, config):
+
+```sh
+cargo test
+```
+
+**2. Headless UI screenshots** — render the real Slint shell scene with the
+software renderer (no display, no GPU) and write PNGs you can inspect:
+
+```sh
+cargo run -p s-compositor --example shell_screenshot
+```
+
+This produces `shot_top_panel.png` (wide panel — clock on one line),
+`shot_right_panel.png` (narrow panel — clock stacked, eyes looking toward the
+pointer) and `shot_settings.png` (the Settings dialog). It is the quickest way to
+confirm a UI change visually after editing anything under `ui/`. The example lives
+in `crates/s-compositor/examples/shell_screenshot.rs`; add cases there (set
+properties, dispatch `WindowEvent`s, call `take_snapshot`) to cover new UI. The
+generated `shot_*.png` files are git-ignored.
+
+> The same `libxkbcommon` dev-symlink note from above applies: linking the
+> example (or any binary) needs `libxkbcommon.so`.
 
 ## License
 
