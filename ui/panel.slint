@@ -46,40 +46,32 @@ component TaskItem inherits Rectangle {
     }
 }
 
-// Virtual-desktop switcher: a strip of numbered buttons.
+// Virtual-desktop switcher. The desktops flow across the panel's thickness:
+// a single line when the panel is thin, wrapping into a compact grid once the
+// panel is wide enough to fit more than one lane.
 component WorkspaceSwitcher {
     in property <int> active;
+    in property <int> count: 4;
     in property <bool> horizontal;
+    in property <length> thickness;   // panel cross-axis size
     callback switch(int);
-    property <[int]> indices: [0, 1, 2, 3];
 
-    if root.horizontal: HorizontalLayout {
-        spacing: 4px;
-        for i in root.indices: Rectangle {
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
+    // Cells across the thickness: 1 (thin) up to 3 (very wide).
+    property <int> lanes: root.thickness >= 128px ? 3 : root.thickness >= 60px ? 2 : 1;
+
+    GridLayout {
+        spacing: 3px;
+        for i in root.count: Rectangle {
+            row: root.horizontal ? Math.mod(i, root.lanes) : floor(i / root.lanes);
+            col: root.horizontal ? floor(i / root.lanes) : Math.mod(i, root.lanes);
+            min-width: 22px;
+            min-height: 22px;
+            border-radius: 5px;
             background: i == root.active ? Theme.accent : Theme.surface;
             Text {
                 text: "\{i + 1}";
                 color: Theme.fg;
-                font-size: 12px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            TouchArea { clicked => { root.switch(i); } }
-        }
-    }
-    if !root.horizontal: VerticalLayout {
-        spacing: 4px;
-        for i in root.indices: Rectangle {
-            height: 26px;
-            border-radius: 6px;
-            background: i == root.active ? Theme.accent : Theme.surface;
-            Text {
-                text: "\{i + 1}";
-                color: Theme.fg;
-                font-size: 12px;
+                font-size: 11px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -99,6 +91,7 @@ export component Panel inherits Rectangle {
     in property <length> cursor-y;
     in property <int> active-workspace;
     in property <int> workspace-count: 4;
+    in property <length> thickness;   // panel size along its short axis
     callback toggle-launcher();
     callback toggle-settings();
     callback activate(int);
@@ -126,6 +119,8 @@ export component Panel inherits Rectangle {
         Rectangle { height: 1px; background: Theme.surface; }
         WorkspaceSwitcher {
             active: root.active-workspace;
+            count: root.workspace-count;
+            thickness: root.thickness;
             horizontal: false;
             switch(n) => { root.switch-workspace(n); }
         }
@@ -163,6 +158,8 @@ export component Panel inherits Rectangle {
         Rectangle { width: 1px; background: Theme.surface; }
         WorkspaceSwitcher {
             active: root.active-workspace;
+            count: root.workspace-count;
+            thickness: root.thickness;
             horizontal: true;
             switch(n) => { root.switch-workspace(n); }
         }

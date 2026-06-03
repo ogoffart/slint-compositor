@@ -101,8 +101,13 @@ which needs a C/C++ toolchain), and the seat/keymap handling needs `libxkbcommon
 On Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential clang libxkbcommon-dev libfontconfig-1-dev
+sudo apt install build-essential clang libxkbcommon-dev libfontconfig-1-dev \
+    libudev-dev libseat-dev libinput-dev libgbm-dev libdrm-dev
 ```
+
+The `libudev`/`libseat`/`libinput`/`libgbm`/`libdrm` packages are needed because
+the bare-metal `backend-linuxkms` backend is enabled by default (so the shell can
+run directly on a TTY without an X11/Wayland session).
 
 > **Note:** the linker needs the `libxkbcommon.so` *development* symlink, not just
 > the runtime `libxkbcommon.so.0`. If you see `error: unable to find library

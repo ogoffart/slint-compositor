@@ -373,6 +373,7 @@ export component Desktop inherits Window {
         windows: root.windows;
         active-workspace: root.active-workspace;
         workspace-count: root.workspace-count;
+        thickness: root.panel-size;
         horizontal: root.panel-edge >= 2;
         width: root.panel-edge >= 2 ? parent.width : root.panel-size;
         height: root.panel-edge >= 2 ? root.panel-size : parent.height;
