@@ -49,13 +49,16 @@ Working today (verified nested under Xvfb + llvmpipe):
   `BorrowedOpenGLTextureBuilder` (rendered with the **Skia** OpenGL renderer).
   Frame callbacks are throttled to ~60Hz.
 - **Server-side decorations**: s-compositor forces `zxdg-decoration` ServerSide and
-  draws the title bar (title + close button) and border itself.
+  draws the title bar (title, minimize/maximize/close) and border itself.
 - **Input**: pointer and keyboard are forwarded to the focused client; windows
-  can be moved (title-bar drag) and resized (corner grip).
-- Right-edge panel with a live clock, a **command launcher** (▶), a **taskbar**,
-  and a **settings** button (⚙) to change the desktop background.
-- A reusable **file dialog**, also exposed as an XDG **FileChooser portal**
-  backend so other apps open files through it (see below).
+  can be moved (title-bar drag), resized (corner grip), maximized and minimized.
+- A panel dockable to any edge (configurable size) with a live clock, a
+  **command launcher** (▶), a **taskbar**, and a **settings** button (⚙).
+- **Theming**: accent colour and light/dark scheme, **persisted** to
+  `s-compositor.conf` in the working directory and **published over the XDG
+  `Settings` portal** (`org.freedesktop.appearance`) so apps follow it.
+- A reusable **file dialog** (editable path, keyboard navigation), also exposed
+  as an XDG **FileChooser portal** backend so other apps open files through it.
 
 Virtual-desktop switching and the system tray are the next milestones. Bare
 metal uses `backend-linuxkms`.

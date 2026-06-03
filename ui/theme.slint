@@ -1,0 +1,15 @@
+// Global theme: accent colour + light/dark scheme, with derived surface colours.
+// Set from Rust (and the Settings dialog); also published over the XDG Settings
+// portal so other apps can follow it.
+export global Theme {
+    in-out property <bool> dark: true;
+    in-out property <color> accent: #89b4fa;
+
+    out property <color> bg: root.dark ? #1e1e2e : #eff1f5;
+    out property <color> panel: root.dark ? #11111b : #e6e9ef;
+    out property <color> surface: root.dark ? #313244 : #ccd0da;
+    out property <color> hover: root.dark ? #45475a : #bcc0cc;
+    out property <color> fg: root.dark ? #cdd6f4 : #4c4f69;
+    out property <color> subtext: root.dark ? #a6adc8 : #6c6f85;
+    out property <color> overlay: root.dark ? #000000aa : #00000066;
+}

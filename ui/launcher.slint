@@ -1,3 +1,4 @@
+import { Theme } from "theme.slint";
 import { LineEdit } from "std-widgets.slint";
 
 // A simple run dialog: type a command and press Enter to launch it.
@@ -6,7 +7,7 @@ export component Launcher inherits Rectangle {
     callback launch(string);
     callback dismiss();
 
-    background: #00000099;
+    background: Theme.overlay;
 
     // Click on the dimmed backdrop dismisses the launcher.
     TouchArea {
@@ -18,10 +19,10 @@ export component Launcher inherits Rectangle {
     Rectangle {
         width: min(480px, parent.width - 80px);
         height: 56px;
-        background: #1e1e2e;
+        background: Theme.bg;
         border-radius: 10px;
         border-width: 1px;
-        border-color: #45475a;
+        border-color: Theme.hover;
 
         // Swallow clicks on the box so they don't reach the backdrop.
         TouchArea {}

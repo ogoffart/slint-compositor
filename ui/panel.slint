@@ -1,13 +1,14 @@
+import { Theme } from "theme.slint";
 import { Clock } from "clock.slint";
 import { WindowTile } from "types.slint";
 
 // A single icon button in the panel.
 component PanelButton inherits Rectangle {
     in property <string> icon;
-    in property <color> icon-color: #cdd6f4;
+    in property <color> icon-color: Theme.fg;
     callback clicked();
     border-radius: 8px;
-    background: ta.has-hover ? #313244 : #181825;
+    background: ta.has-hover ? Theme.surface : Theme.panel;
     Text {
         text: root.icon;
         color: root.icon-color;
@@ -27,10 +28,10 @@ component TaskItem inherits Rectangle {
     in property <WindowTile> tile;
     callback activate();
     border-radius: 6px;
-    background: tile.focused ? #585b70 : (a.has-hover ? #313244 : #181825);
+    background: tile.focused ? Theme.accent : (a.has-hover ? Theme.surface : Theme.panel);
     Text {
         text: tile.title == "" ? "?" : tile.title;
-        color: #cdd6f4;
+        color: Theme.fg;
         font-size: 11px;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -54,14 +55,14 @@ export component Panel inherits Rectangle {
     callback toggle-settings();
     callback activate(int);
 
-    background: #11111b;
+    background: Theme.panel;
 
     if !root.horizontal: VerticalLayout {
         padding: 8px;
         spacing: 10px;
         PanelButton {
             icon: "▶";
-            icon-color: #89b4fa;
+            icon-color: Theme.accent;
             height: 40px;
             clicked => { root.toggle-launcher(); }
         }
@@ -72,7 +73,7 @@ export component Panel inherits Rectangle {
             clicked => { root.toggle-settings(); }
         }
         Clock { time: root.clock-time; }
-        Rectangle { height: 1px; background: #313244; }
+        Rectangle { height: 1px; background: Theme.surface; }
         VerticalLayout {
             vertical-stretch: 1;
             spacing: 6px;
@@ -83,7 +84,7 @@ export component Panel inherits Rectangle {
                 activate => { root.activate(win.id); }
             }
         }
-        Text { text: "•••"; color: #6c7086; horizontal-alignment: center; }
+        Text { text: "•••"; color: Theme.subtext; horizontal-alignment: center; }
     }
 
     if root.horizontal: HorizontalLayout {
@@ -91,7 +92,7 @@ export component Panel inherits Rectangle {
         spacing: 10px;
         PanelButton {
             icon: "▶";
-            icon-color: #89b4fa;
+            icon-color: Theme.accent;
             width: 40px;
             clicked => { root.toggle-launcher(); }
         }
@@ -102,7 +103,7 @@ export component Panel inherits Rectangle {
             clicked => { root.toggle-settings(); }
         }
         Clock { time: root.clock-time; }
-        Rectangle { width: 1px; background: #313244; }
+        Rectangle { width: 1px; background: Theme.surface; }
         HorizontalLayout {
             horizontal-stretch: 1;
             spacing: 6px;
@@ -113,6 +114,6 @@ export component Panel inherits Rectangle {
                 activate => { root.activate(win.id); }
             }
         }
-        Text { text: "•••"; color: #6c7086; vertical-alignment: center; }
+        Text { text: "•••"; color: Theme.subtext; vertical-alignment: center; }
     }
 }

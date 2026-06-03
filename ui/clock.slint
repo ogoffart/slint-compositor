@@ -1,3 +1,4 @@
+import { Theme } from "theme.slint";
 // Panel clock: shows the time stacked as "HH" over "MM".
 export component Clock inherits Rectangle {
     in property <string> time;
@@ -5,7 +6,7 @@ export component Clock inherits Rectangle {
 
     label := Text {
         text: root.time;
-        color: #cdd6f4;
+        color: Theme.fg;
         font-size: 18px;
         font-weight: 700;
         horizontal-alignment: center;
