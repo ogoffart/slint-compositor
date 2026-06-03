@@ -353,6 +353,12 @@ export component Desktop inherits Window {
     callback fd-move-selection(int);
     callback fd-activate-selected();
     callback settings-changed();
+    in-out property <int> settings-tab;     // 0 General, 1 Shortcuts
+    // Shortcut editing from the Settings dialog: list (0 menu, 1 desktop,
+    // 2 panel), index, field (0 icon, 1 name, 2 command) and value.
+    callback shortcut-set(int, int, int, string);
+    callback shortcut-add(int);
+    callback shortcut-remove(int, int);
     callback dismiss-popups();
 
     preferred-width: 1280px;
@@ -755,6 +761,19 @@ export component Desktop inherits Window {
         height: parent.height;
         panel-edge <=> root.panel-edge;
         panel-size <=> root.panel-size;
+        tab <=> root.settings-tab;
+        menu-entries: root.menu-entries;
+        desktop-entries: root.desktop-icons;
+        panel-entries: root.panel-launchers;
+        shortcut-set(l, i, f, v) => {
+            root.shortcut-set(l, i, f, v);
+        }
+        shortcut-add(l) => {
+            root.shortcut-add(l);
+        }
+        shortcut-remove(l, i) => {
+            root.shortcut-remove(l, i);
+        }
         change-background => {
             root.settings-visible = false;
             root.change-background();
