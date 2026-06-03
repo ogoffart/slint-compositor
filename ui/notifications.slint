@@ -1,0 +1,84 @@
+import { Theme } from "theme.slint";
+import { Notification } from "types.slint";
+
+// A single notification card.
+component NotificationCard inherits Rectangle {
+    in property <Notification> note;
+    callback dismiss();
+    width: 340px;
+    height: layout.preferred-height;
+    background: Theme.bg;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Theme.hover;
+
+    layout := HorizontalLayout {
+        padding: 12px;
+        spacing: 10px;
+
+        if root.note.icon.width > 0: Image {
+            source: root.note.icon;
+            width: 32px;
+            height: 32px;
+            image-fit: contain;
+            vertical-alignment: top;
+        }
+
+        VerticalLayout {
+            spacing: 2px;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.note.summary != "" ? root.note.summary : root.note.app-name;
+                    color: Theme.fg;
+                    font-size: 13px;
+                    font-weight: 700;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: "✕";
+                    color: close-ta.has-hover ? #f38ba8 : Theme.subtext;
+                    font-size: 13px;
+                    close-ta := TouchArea {
+                        clicked => {
+                            root.dismiss();
+                        }
+                    }
+                }
+            }
+            if root.note.app-name != "" && root.note.summary != "": Text {
+                text: root.note.app-name;
+                color: Theme.subtext;
+                font-size: 10px;
+            }
+            if root.note.body != "": Text {
+                text: root.note.body;
+                color: Theme.fg;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// A top-right stack of notification popups. Only the cards capture input; the
+// surrounding area stays click-through.
+export component Notifications inherits Rectangle {
+    in property <[Notification]> notes;
+    callback dismiss(int);
+
+    VerticalLayout {
+        x: parent.width - self.width - 12px;
+        y: 12px;
+        width: 340px;
+        spacing: 8px;
+        for note in root.notes: NotificationCard {
+            note: note;
+            dismiss => {
+                root.dismiss(note.id);
+            }
+        }
+    }
+}

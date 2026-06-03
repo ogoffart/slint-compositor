@@ -403,7 +403,9 @@ impl Browser {
             let size = if is_dir {
                 "—".to_string()
             } else {
-                meta.as_ref().map(|m| human_size(m.len())).unwrap_or_default()
+                meta.as_ref()
+                    .map(|m| human_size(m.len()))
+                    .unwrap_or_default()
             };
             let modified = meta
                 .as_ref()
@@ -460,11 +462,7 @@ impl Browser {
 /// Launch a file with the system default handler, detached from this process.
 fn launch(path: &Path) {
     use std::process::{Command, Stdio};
-    let opener = if which("xdg-open") {
-        "xdg-open"
-    } else {
-        "gio"
-    };
+    let opener = if which("xdg-open") { "xdg-open" } else { "gio" };
     let mut cmd = Command::new(opener);
     if opener == "gio" {
         cmd.arg("open");
@@ -593,7 +591,10 @@ mod tests {
         assert_eq!(file_kind(Path::new("a.mp3"), false), "audio");
         assert_eq!(file_kind(Path::new("main.rs"), false), "code");
         assert_eq!(file_kind(Path::new("a.pdf"), false), "pdf");
-        assert_eq!(file_kind(Path::new("/nonexistent/unknown.xyz"), false), "file");
+        assert_eq!(
+            file_kind(Path::new("/nonexistent/unknown.xyz"), false),
+            "file"
+        );
     }
 
     #[test]
@@ -622,7 +623,10 @@ mod tests {
 
     fn scratch() -> PathBuf {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("sfiles-model-{n}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -642,7 +646,10 @@ mod tests {
         b.navigate(dir.clone()); // selects the only entry
         b.copy();
         b.paste();
-        assert_eq!(std::fs::read_to_string(dir.join("a (copy).txt")).unwrap(), "hello");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("a (copy).txt")).unwrap(),
+            "hello"
+        );
         assert!(dir.join("a.txt").exists()); // original kept
     }
 

@@ -19,6 +19,7 @@ mod gl_bridge;
 mod icons;
 mod keybind;
 mod network;
+mod notify;
 mod portal;
 mod volume;
 use gl_bridge::{Frame, GlBridge};
@@ -402,6 +403,18 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Notification daemon + on-screen popups.
+    let notif_model = Rc::new(VecModel::<Notification>::default());
+    desktop.set_notifications(ModelRc::from(notif_model.clone()));
+    let notif_expiry: Rc<RefCell<HashMap<u32, std::time::Instant>>> =
+        Rc::new(RefCell::new(HashMap::new()));
+    let notif_rx = notify::spawn();
+    desktop.on_dismiss_notification({
+        let notif_model = notif_model.clone();
+        let notif_expiry = notif_expiry.clone();
+        move |id| remove_notification(&notif_model, &notif_expiry, id as u32)
+    });
+
     // Lock screen: unlock when the typed password matches (or none is set).
     desktop.on_unlock({
         let weak = desktop.as_weak();
@@ -607,8 +620,21 @@ fn main() -> anyhow::Result<()> {
         let tray_model = tray_model.clone();
         let tray_ids = tray_ids.clone();
         let wifi_model = wifi_model.clone();
+        let notif_model = notif_model.clone();
+        let notif_expiry = notif_expiry.clone();
         move || {
             let mut dirty = false;
+
+            // Drain notifications, and expire timed-out ones.
+            if let Some(rx) = &notif_rx {
+                while let Ok(event) = rx.try_recv() {
+                    apply_notify_event(event, &notif_model, &notif_expiry);
+                    dirty = true;
+                }
+            }
+            if expire_notifications(&notif_model, &notif_expiry) {
+                dirty = true;
+            }
 
             // Drain SNI tray updates.
             if let Some(rx) = &tray_rx {
@@ -1245,6 +1271,84 @@ fn apply_net_event(event: network::NetEvent, d: &Desktop, model: &Rc<VecModel<Wi
                 .collect();
             model.set_vec(rows);
         }
+    }
+}
+
+/// Apply a notification event: `Add` upserts a popup (and schedules its expiry),
+/// `Close` removes it.
+fn apply_notify_event(
+    event: notify::NotifyEvent,
+    model: &Rc<VecModel<Notification>>,
+    expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
+) {
+    match event {
+        notify::NotifyEvent::Add {
+            id,
+            app_name,
+            summary,
+            body,
+            icon,
+            timeout_ms,
+        } => {
+            let note = Notification {
+                id: id as i32,
+                app_name: app_name.into(),
+                summary: summary.into(),
+                body: body.into(),
+                icon: icons::image_for_icon_name(&icon),
+            };
+            let pos = (0..model.row_count())
+                .find(|&i| model.row_data(i).map(|n| n.id as u32) == Some(id));
+            match pos {
+                Some(i) => model.set_row_data(i, note),
+                None => model.push(note),
+            }
+            // 0 = never expire; -1 = default (5s); otherwise the given ms.
+            if timeout_ms != 0 {
+                let ms = if timeout_ms < 0 {
+                    5000
+                } else {
+                    timeout_ms as u64
+                };
+                expiry
+                    .borrow_mut()
+                    .insert(id, std::time::Instant::now() + Duration::from_millis(ms));
+            } else {
+                expiry.borrow_mut().remove(&id);
+            }
+        }
+        notify::NotifyEvent::Close { id } => remove_notification(model, expiry, id),
+    }
+}
+
+/// Remove timed-out notifications. Returns true if any were removed.
+fn expire_notifications(
+    model: &Rc<VecModel<Notification>>,
+    expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
+) -> bool {
+    let now = std::time::Instant::now();
+    let due: Vec<u32> = expiry
+        .borrow()
+        .iter()
+        .filter(|(_, &t)| t <= now)
+        .map(|(&id, _)| id)
+        .collect();
+    for id in &due {
+        remove_notification(model, expiry, *id);
+    }
+    !due.is_empty()
+}
+
+fn remove_notification(
+    model: &Rc<VecModel<Notification>>,
+    expiry: &Rc<RefCell<HashMap<u32, std::time::Instant>>>,
+    id: u32,
+) {
+    expiry.borrow_mut().remove(&id);
+    if let Some(i) =
+        (0..model.row_count()).find(|&i| model.row_data(i).map(|n| n.id as u32) == Some(id))
+    {
+        model.remove(i);
     }
 }
 

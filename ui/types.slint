@@ -51,6 +51,15 @@ export struct TrayIcon {
     icon: image,
 }
 
+// An on-screen notification popup.
+export struct Notification {
+    id: int,
+    app-name: string,
+    summary: string,
+    body: string,
+    icon: image,
+}
+
 // A WiFi access point shown in the quick-settings network list.
 export struct WifiNetwork {
     ssid: string,

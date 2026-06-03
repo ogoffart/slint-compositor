@@ -63,9 +63,36 @@ Working today (verified nested under Xvfb + llvmpipe):
   `Settings` portal** (`org.freedesktop.appearance`) so apps follow it.
 - A reusable **file dialog** (editable path, keyboard navigation), also exposed
   as an XDG **FileChooser portal** backend so other apps open files through it.
+- A **system tray**: an SNI (`StatusNotifierItem`) host, **Wi-Fi** (NetworkManager:
+  scan / connect with password / toggle) and **volume** (libpulse) in a
+  quick-settings flyout.
+- A **notification daemon** (`org.freedesktop.Notifications`) with on-screen
+  popups.
+- **Configurable global keyboard shortcuts** (see below).
 
-Virtual-desktop switching and the system tray are the next milestones. Bare
-metal uses `backend-linuxkms`.
+Bare metal uses `backend-linuxkms`.
+
+## Keyboard shortcuts
+
+Shortcuts are configured in `s-compositor.conf` as `bind = <combo> = <action>`,
+e.g.:
+
+```
+bind = Super+Return = spawn:alacritty
+bind = Super+d = start-menu
+bind = Super+q = close-window
+bind = Alt+Tab = next-window
+bind = Super+1 = workspace:1
+bind = Super+Shift+1 = move-to-workspace:1
+bind = Super+Equal = volume-up
+```
+
+Modifiers are `Super`/`Ctrl`/`Alt`/`Shift`; keys are letters, digits or names
+(`Return`, `Space`, `Tab`, `Escape`, `Minus`, `Equal`, `Comma`, `Period`).
+Actions: `spawn:<cmd>`, `start-menu`, `launcher`, `settings`, `quick-settings`,
+`lock`, `logout`, `close-window`, `next-window`, `prev-window`, `workspace:<n>`,
+`move-to-workspace:<n>`, `workspace-next`, `workspace-prev`, `volume-up`,
+`volume-down`, `volume-mute`. With no `bind` lines, sensible defaults are used.
 
 ## File chooser portal
 

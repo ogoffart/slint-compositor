@@ -129,7 +129,10 @@ mod screenshot {
         let browser = Rc::new(RefCell::new(Browser::new(files.as_weak(), items)));
         browser.borrow_mut().navigate(PathBuf::from(&dir));
         // Optionally Shift-select rows 0..=N to show multi-selection.
-        if let Some(n) = std::env::var("SFILES_SHOT_RANGE").ok().and_then(|v| v.parse::<i32>().ok()) {
+        if let Some(n) = std::env::var("SFILES_SHOT_RANGE")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+        {
             browser.borrow_mut().row_pressed(0, false, false);
             browser.borrow_mut().row_pressed(n, false, true);
         }

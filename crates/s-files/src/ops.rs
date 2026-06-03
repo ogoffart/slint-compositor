@@ -185,7 +185,9 @@ fn data_home() -> PathBuf {
     if let Some(dir) = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
         return PathBuf::from(dir);
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"));
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
     home.join(".local/share")
 }
 
@@ -203,7 +205,11 @@ mod tests {
         use std::time::{SystemTime, UNIX_EPOCH};
         static C: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = C.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64 ^ (n << 32)
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64
+            ^ (n << 32)
     }
 
     #[test]
@@ -213,7 +219,10 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         assert_eq!(unique_destination(&dir, "a.txt"), dir.join("a (copy).txt"));
         std::fs::write(dir.join("a (copy).txt"), "x").unwrap();
-        assert_eq!(unique_destination(&dir, "a.txt"), dir.join("a (copy 2).txt"));
+        assert_eq!(
+            unique_destination(&dir, "a.txt"),
+            dir.join("a (copy 2).txt")
+        );
         // Dotfile with no extension.
         std::fs::write(dir.join("notes"), "x").unwrap();
         assert_eq!(unique_destination(&dir, "notes"), dir.join("notes (copy)"));
@@ -234,7 +243,10 @@ mod tests {
         let out = copy_into(&src, &dst_dir).unwrap();
         assert_eq!(out, dst_dir.join("src"));
         assert_eq!(std::fs::read_to_string(out.join("f.txt")).unwrap(), "hello");
-        assert_eq!(std::fs::read_to_string(out.join("sub/g.txt")).unwrap(), "world");
+        assert_eq!(
+            std::fs::read_to_string(out.join("sub/g.txt")).unwrap(),
+            "world"
+        );
         // Original survives a copy.
         assert!(src.join("f.txt").exists());
 

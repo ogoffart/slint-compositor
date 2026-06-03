@@ -239,7 +239,35 @@ fn main() {
     save(&ui, &window, PhysicalSize::new(1100, 720), "shot_quick.png");
     ui.set_quick_settings_visible(false);
 
-    // 6. Lock screen.
+    // 6. Notification popups.
+    ui.set_notifications(
+        Rc::new(slint::VecModel::from(vec![
+            Notification {
+                id: 1,
+                app_name: "Email".into(),
+                summary: "New message".into(),
+                body: "Alice: lunch at noon?".into(),
+                icon: solid_icon(0x89, 0xb4, 0xfa),
+            },
+            Notification {
+                id: 2,
+                app_name: "Updates".into(),
+                summary: "12 packages can be upgraded".into(),
+                body: "Run your package manager to apply them.".into(),
+                icon: solid_icon(0xa6, 0xe3, 0xa1),
+            },
+        ]))
+        .into(),
+    );
+    save(
+        &ui,
+        &window,
+        PhysicalSize::new(1100, 720),
+        "shot_notify.png",
+    );
+    ui.set_notifications(Rc::new(slint::VecModel::default()).into());
+
+    // 7. Lock screen.
     ui.set_lock_has_password(true);
     ui.set_locked(true);
     save(&ui, &window, PhysicalSize::new(1100, 720), "shot_lock.png");

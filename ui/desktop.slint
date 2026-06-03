@@ -4,10 +4,11 @@ import { Launcher } from "launcher.slint";
 import { StartMenu } from "start_menu.slint";
 import { LockScreen } from "lock_screen.slint";
 import { QuickSettings } from "quick_settings.slint";
+import { Notifications } from "notifications.slint";
 import { Settings } from "settings.slint";
 import { FileDialog } from "file_dialog.slint";
-import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork } from "types.slint";
-export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork }
+import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification } from "types.slint";
+export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork, Notification }
 export { Theme }
 
 // Server-side decoration + input routing for one client window.
@@ -248,6 +249,10 @@ export component Desktop inherits Window {
     callback wifi-connect(string, string);
     callback tray-activate(string);
 
+    // On-screen notifications.
+    in property <[Notification]> notifications;
+    callback dismiss-notification(int);
+
     // Start menu + lock screen.
     in property <[MenuEntry]> menu-entries;
     in-out property <bool> locked: false;
@@ -449,6 +454,18 @@ export component Desktop inherits Window {
         }
         tray-activate(id) => {
             root.tray-activate(id);
+        }
+    }
+
+    // Notification popups (top-right; click-through except the cards).
+    Notifications {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        notes: root.notifications;
+        dismiss(id) => {
+            root.dismiss-notification(id);
         }
     }
 
