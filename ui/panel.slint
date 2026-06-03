@@ -1,7 +1,7 @@
 import { Theme } from "theme.slint";
 import { Clock } from "clock.slint";
 import { Eyes } from "eyes.slint";
-import { WindowTile, TrayIcon } from "types.slint";
+import { WindowTile, TrayIcon, MenuEntry } from "types.slint";
 
 // One StatusNotifierItem icon in the tray.
 component TrayButton inherits Rectangle {
@@ -151,12 +151,13 @@ export component Panel inherits Rectangle {
     in property <int> workspace-count: 4;
     in property <length> thickness;   // panel size along its short axis
     in property <[TrayIcon]> tray-icons;
+    in property <[MenuEntry]> launchers;
     in property <bool> muted;
     callback toggle-start-menu();
     callback toggle-settings();
     callback toggle-quick-settings();
     callback toggle-calendar();
-    callback open-files();
+    callback launch(string);
     callback activate(int);
     callback switch-workspace(int);
     callback tray-activate(string);
@@ -172,11 +173,11 @@ export component Panel inherits Rectangle {
             height: 40px;
             clicked => { root.toggle-start-menu(); }
         }
-        PanelButton {
-            icon: "🗂";
+        for app in root.launchers: PanelButton {
+            icon: app.icon;
             icon-color: #e6b34d;
             height: 40px;
-            clicked => { root.open-files(); }
+            clicked => { root.launch(app.command); }
         }
         PanelButton {
             icon: "⚙";
@@ -229,11 +230,11 @@ export component Panel inherits Rectangle {
             width: 40px;
             clicked => { root.toggle-start-menu(); }
         }
-        PanelButton {
-            icon: "🗂";
+        for app in root.launchers: PanelButton {
+            icon: app.icon;
             icon-color: #e6b34d;
             width: 40px;
-            clicked => { root.open-files(); }
+            clicked => { root.launch(app.command); }
         }
         PanelButton {
             icon: "⚙";

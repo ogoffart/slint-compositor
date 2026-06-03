@@ -218,6 +218,38 @@ component WindowFrame inherits Rectangle {
     }
 }
 
+// A clickable shortcut icon on the desktop wallpaper.
+component DesktopShortcut inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    callback launch();
+    width: 96px;
+    height: 86px;
+    border-radius: 10px;
+    background: ta.has-hover ? Theme.overlay : #00000022;
+    VerticalLayout {
+        padding: 8px;
+        spacing: 2px;
+        Text {
+            text: root.icon;
+            font-size: 34px;
+            height: 46px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label;
+            color: #ffffff;
+            font-size: 12px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+    ta := TouchArea {
+        double-clicked => { root.launch(); }
+    }
+}
+
 // Root scene: composited client windows + the right-edge panel.
 export component Desktop inherits Window {
     in property <string> clock-hours;
@@ -284,8 +316,9 @@ export component Desktop inherits Window {
     in-out property <int> file-dialog-selected: -1;
     in property <image> file-dialog-preview;
     in property <string> file-dialog-selected-name;
-    // Command for the panel's quick-launch Files button.
-    in property <string> files-command;
+    // Configurable desktop shortcut icons and panel quick-launch buttons.
+    in property <[MenuEntry]> desktop-icons;
+    in property <[MenuEntry]> panel-launchers;
 
     callback launch(string);
     callback close-window(int);
@@ -368,6 +401,21 @@ export component Desktop inherits Window {
         moved => {
             root.cursor-x = self.absolute-position.x + self.mouse-x;
             root.cursor-y = self.absolute-position.y + self.mouse-y;
+        }
+    }
+
+    // Desktop shortcut icons, in a column near the top-left corner (offset to
+    // clear the panel when it is docked left or top). Double-click to launch.
+    VerticalLayout {
+        x: (root.panel-edge == 1 ? root.panel-size : 0px) + 14px;
+        y: (root.panel-edge == 2 ? root.panel-size : 0px) + 14px;
+        width: 96px;
+        spacing: 8px;
+        alignment: start;
+        for app in root.desktop-icons: DesktopShortcut {
+            icon: app.icon;
+            label: app.name;
+            launch => { root.launch(app.command); }
         }
     }
 
@@ -459,6 +507,7 @@ export component Desktop inherits Window {
         workspace-count: root.workspace-count;
         thickness: root.panel-size;
         tray-icons: root.tray-icons;
+        launchers: root.panel-launchers;
         muted: root.muted;
         horizontal: root.panel-edge >= 2;
         width: root.panel-edge >= 2 ? parent.width : root.panel-size;
@@ -471,8 +520,8 @@ export component Desktop inherits Window {
         toggle-settings => {
             root.settings-visible = !root.settings-visible;
         }
-        open-files => {
-            root.launch(root.files-command);
+        launch(cmd) => {
+            root.launch(cmd);
         }
         toggle-quick-settings => {
             root.quick-settings-visible = !root.quick-settings-visible;
