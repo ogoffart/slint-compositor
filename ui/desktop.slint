@@ -1,37 +1,34 @@
 import { Panel } from "panel.slint";
 import { Launcher } from "launcher.slint";
+import { WindowTile } from "types.slint";
+export { WindowTile }
 
-// A composited client window: its current frame, title and geometry.
-export struct WindowTile {
-    id: int,
-    texture: image,
-    title: string,
-    decorated: bool,
-    x: length,
-    y: length,
-    width: length,
-    height: length,
-}
-
-// Server-side decoration drawn around a client window: a title bar with the
-// window title and a close button, plus a border. The client content sits below.
+// Server-side decoration + input routing for one client window.
 component WindowFrame inherits Rectangle {
     in property <WindowTile> tile;
     callback close();
+    callback moved(length, length);              // title-bar drag delta
+    callback resized(length, length);            // resize-grip drag delta
+    callback focus-requested();                  // raise + focus
+    // pointer: surface-local x, y, kind (0=move,1=down,2=up), button (0..3)
+    callback pointer(float, float, int, int);
+    callback scroll(float, float);
+    // key: text, pressed, ctrl, alt, shift
+    callback key(string, bool, bool, bool, bool);
 
     x: tile.x;
     y: tile.y;
     width: tile.width;
     height: tile.decorated ? tile.height + 28px : tile.height;
     border-width: tile.decorated ? 1px : 0px;
-    border-color: #45475a;
-    background: transparent;
+    border-color: tile.focused ? #89b4fa : #45475a;
+    background: #313244;
 
     VerticalLayout {
-        // Title bar (only for server-side-decorated windows).
+        // Title bar (server-side decoration only).
         if tile.decorated: Rectangle {
             height: 28px;
-            background: #313244;
+            background: tile.focused ? #45475a : #313244;
 
             HorizontalLayout {
                 padding-left: 8px;
@@ -53,7 +50,6 @@ component WindowFrame inherits Rectangle {
                     height: 22px;
                     border-radius: 4px;
                     background: close-ta.has-hover ? #f38ba8 : transparent;
-
                     Text {
                         text: "✕";
                         color: close-ta.has-hover ? #11111b : #cdd6f4;
@@ -61,7 +57,6 @@ component WindowFrame inherits Rectangle {
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
-
                     close-ta := TouchArea {
                         clicked => {
                             root.close();
@@ -69,30 +64,99 @@ component WindowFrame inherits Rectangle {
                     }
                 }
             }
+
+            // Drag the title bar (left of the close button) to move the window.
+            drag := TouchArea {
+                width: parent.width - 28px;
+                height: parent.height;
+                mouse-cursor: move;
+                moved => {
+                    root.moved(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+            }
         }
 
-        // Client content.
-        Image {
-            source: tile.texture;
-            width: tile.width;
-            height: tile.height;
-            image-fit: fill;
-            image-rendering: pixelated;
+        // Client content + input.
+        fs := FocusScope {
+            key-pressed(e) => {
+                root.key(e.text, true, e.modifiers.control, e.modifiers.alt, e.modifiers.shift);
+                accept
+            }
+            key-released(e) => {
+                root.key(e.text, false, e.modifiers.control, e.modifiers.alt, e.modifiers.shift);
+                accept
+            }
+
+            Image {
+                source: tile.texture;
+                width: 100%;
+                height: 100%;
+                image-fit: fill;
+                image-rendering: pixelated;
+            }
+
+            ta := TouchArea {
+                width: 100%;
+                height: 100%;
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down {
+                        root.focus-requested();
+                        fs.focus();
+                        root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 1, self.btn-code(e.button));
+                    } else if e.kind == PointerEventKind.up {
+                        root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 2, self.btn-code(e.button));
+                    } else if e.kind == PointerEventKind.move {
+                        root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
+                    }
+                }
+                moved => {
+                    root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
+                }
+                scroll-event(e) => {
+                    root.scroll(e.delta-x / 1px, e.delta-y / 1px);
+                    accept
+                }
+                // Map Slint's button enum to an index (1=left,2=right,3=middle).
+                pure function btn-code(b: PointerEventButton) -> int {
+                    b == PointerEventButton.left ? 1
+                        : b == PointerEventButton.right ? 2
+                        : b == PointerEventButton.middle ? 3
+                        : 0
+                }
+            }
+        }
+    }
+
+    // Resize grip (bottom-right corner).
+    Rectangle {
+        width: 16px;
+        height: 16px;
+        x: parent.width - self.width;
+        y: parent.height - self.height;
+        background: grip.has-hover ? #585b70 : transparent;
+        grip := TouchArea {
+            mouse-cursor: nwse-resize;
+            moved => {
+                root.resized(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
         }
     }
 }
 
-// Root scene. The area left of the panel is the composited client-window
-// layer; each window is drawn with server-side decorations.
+// Root scene: composited client windows + the right-edge panel.
 export component Desktop inherits Window {
     in property <string> clock-time;
     in property <[WindowTile]> windows;
     in-out property <bool> launcher-visible: false;
 
-    // Emitted when the user submits a command in the launcher.
     callback launch(string);
-    // Emitted when the user clicks a window's close button.
     callback close-window(int);
+    callback activate-window(int);                       // taskbar / raise + focus
+    callback move-window(int, length, length);
+    callback resize-window(int, length, length);
+    callback pointer-window(int, float, float, int, int);
+    callback scroll-window(int, float, float);
+    callback key-window(int, string, bool, bool, bool, bool);
 
     preferred-width: 1280px;
     preferred-height: 800px;
@@ -104,15 +168,37 @@ export component Desktop inherits Window {
         close => {
             root.close-window(win.id);
         }
+        moved(dx, dy) => {
+            root.move-window(win.id, dx, dy);
+        }
+        resized(dw, dh) => {
+            root.resize-window(win.id, dw, dh);
+        }
+        focus-requested => {
+            root.activate-window(win.id);
+        }
+        pointer(x, y, kind, btn) => {
+            root.pointer-window(win.id, x, y, kind, btn);
+        }
+        scroll(dx, dy) => {
+            root.scroll-window(win.id, dx, dy);
+        }
+        key(text, pressed, ctrl, alt, shift) => {
+            root.key-window(win.id, text, pressed, ctrl, alt, shift);
+        }
     }
 
     Panel {
         clock-time: root.clock-time;
+        windows: root.windows;
         x: parent.width - self.width;
         y: 0;
         height: parent.height;
         toggle-launcher => {
             root.launcher-visible = !root.launcher-visible;
+        }
+        activate(id) => {
+            root.activate-window(id);
         }
     }
 

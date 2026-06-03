@@ -1,10 +1,13 @@
 import { Clock } from "clock.slint";
+import { WindowTile } from "types.slint";
 
-// The right-edge panel: a launcher button and clock on top, taskbar in the
-// middle (M4), system tray at the bottom (M6).
+// The right-edge panel: launcher button + clock on top, taskbar in the middle,
+// system tray at the bottom (M6).
 export component Panel inherits Rectangle {
     in property <string> clock-time;
+    in property <[WindowTile]> windows;
     callback toggle-launcher();
+    callback activate(int);
 
     width: 56px;
     background: #11111b;
@@ -13,12 +16,11 @@ export component Panel inherits Rectangle {
         padding: 8px;
         spacing: 12px;
 
-        // Launcher button: opens the run dialog.
+        // Launcher button.
         Rectangle {
             height: 40px;
             border-radius: 8px;
             background: launch-area.has-hover ? #313244 : #181825;
-
             Text {
                 text: "▶";
                 color: #89b4fa;
@@ -26,7 +28,6 @@ export component Panel inherits Rectangle {
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
-
             launch-area := TouchArea {
                 clicked => {
                     root.toggle-launcher();
@@ -38,12 +39,38 @@ export component Panel inherits Rectangle {
             time: root.clock-time;
         }
 
-        // Taskbar region — populated from live windows in M4.
-        Rectangle {
+        Rectangle { height: 1px; background: #313244; }
+
+        // Taskbar: one entry per open window.
+        VerticalLayout {
+            spacing: 6px;
             vertical-stretch: 1;
+            alignment: start;
+
+            for win in root.windows: Rectangle {
+                height: 40px;
+                border-radius: 6px;
+                background: win.focused ? #585b70 : (item-area.has-hover ? #313244 : #181825);
+
+                Text {
+                    text: win.title == "" ? "?" : win.title;
+                    color: #cdd6f4;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    width: parent.width - 6px;
+                }
+
+                item-area := TouchArea {
+                    clicked => {
+                        root.activate(win.id);
+                    }
+                }
+            }
         }
 
-        // System tray placeholder — wired to SNI in M6.
+        // System tray placeholder (M6).
         Text {
             text: "•••";
             color: #6c7086;

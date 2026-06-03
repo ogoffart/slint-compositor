@@ -22,6 +22,7 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 
 mod handlers;
+mod input;
 mod state;
 mod workspace;
 
@@ -67,6 +68,28 @@ pub enum Event {
 pub enum Command {
     /// Ask a window to close (sends `xdg_toplevel.close`).
     CloseWindow(WindowId),
+    /// Give keyboard focus to a window (e.g. taskbar click).
+    FocusWindow(WindowId),
+    /// Pointer moved to surface-local `(x, y)` over the given window.
+    PointerMotion { id: WindowId, x: f64, y: f64 },
+    /// Pointer button (evdev code) pressed/released over the given window.
+    PointerButton {
+        id: WindowId,
+        button: u32,
+        pressed: bool,
+    },
+    /// Pointer left all client windows.
+    PointerLeave,
+    /// Vertical/horizontal scroll over the given window.
+    PointerAxis { id: WindowId, dx: f64, dy: f64 },
+    /// A key (evdev keycode) pressed/released for the focused window.
+    Key { keycode: u32, pressed: bool },
+    /// Resize a window to the given size (sends an xdg configure).
+    ResizeWindow {
+        id: WindowId,
+        width: i32,
+        height: i32,
+    },
 }
 
 /// Re-exported so the UI crate can hold the sending half.
