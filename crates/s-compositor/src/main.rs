@@ -314,8 +314,8 @@ fn main() -> anyhow::Result<()> {
         let _ = slint::quit_event_loop();
     });
 
-    // Quick settings / system tray. Backends (PipeWire, NetworkManager, SNI
-    // host) are wired in below where available; these handlers are the UI side.
+    // Quick settings / system tray. Volume + Wi-Fi backends are wired in below
+    // where available; these handlers are the UI side.
     desktop.set_volume(50.0);
     desktop.set_wifi_enabled(true);
     desktop.on_set_volume(|v| log::info!("set volume {v}"));
@@ -323,7 +323,23 @@ fn main() -> anyhow::Result<()> {
     desktop.on_wifi_toggle(|| log::info!("toggle wifi"));
     desktop.on_wifi_scan(|| log::info!("wifi scan"));
     desktop.on_wifi_connect(|ssid, _pw| log::info!("wifi connect {ssid}"));
-    desktop.on_tray_activate(|id| log::info!("tray activate {id}"));
+
+    // System tray (SNI host on its own thread).
+    let tray_model = Rc::new(VecModel::<TrayIcon>::default());
+    desktop.set_tray_icons(ModelRc::from(tray_model.clone()));
+    let tray_ids = Rc::new(RefCell::new(Vec::<String>::new()));
+    let (tray_rx, tray_cmd_tx) = match s_compositor_tray::run() {
+        Some((rx, tx)) => (Some(rx), Some(tx)),
+        None => (None, None),
+    };
+    desktop.on_tray_activate({
+        let tx = tray_cmd_tx.clone();
+        move |id| {
+            if let Some(tx) = &tx {
+                let _ = tx.send(s_compositor_tray::TrayCommand::Activate(id.to_string()));
+            }
+        }
+    });
 
     // Lock screen: unlock when the typed password matches (or none is set).
     desktop.on_unlock({
@@ -501,8 +517,18 @@ fn main() -> anyhow::Result<()> {
         let file_dialog = file_dialog.clone();
         let cmd_tx = cmd_tx.clone();
         let icon_cache = icon_cache.clone();
+        let tray_model = tray_model.clone();
+        let tray_ids = tray_ids.clone();
         move || {
             let mut dirty = false;
+
+            // Drain SNI tray updates.
+            if let Some(rx) = &tray_rx {
+                while let Ok(update) = rx.try_recv() {
+                    apply_tray_update(update, &tray_model, &tray_ids);
+                    dirty = true;
+                }
+            }
             let active_ws = weak
                 .upgrade()
                 .map(|d| d.get_active_workspace())
@@ -945,6 +971,57 @@ fn set_maximized(
         height: tile.height as i32,
     });
     model.set_row_data(row, tile);
+}
+
+/// Apply one SNI tray update to the model. `Add` upserts; `Remove` drops the row.
+fn apply_tray_update(
+    update: s_compositor_tray::TrayUpdate,
+    model: &Rc<VecModel<TrayIcon>>,
+    ids: &Rc<RefCell<Vec<String>>>,
+) {
+    match update {
+        s_compositor_tray::TrayUpdate::Add {
+            id,
+            title,
+            icon_name,
+            pixmap,
+        } => {
+            let icon = match pixmap {
+                Some((w, h, px)) => image_from_rgba(w, h, &px),
+                None => icons::image_for_icon_name(&icon_name),
+            };
+            let tile = TrayIcon {
+                id: id.clone().into(),
+                title: title.into(),
+                icon,
+            };
+            let pos = ids.borrow().iter().position(|x| x == &id);
+            match pos {
+                Some(idx) => model.set_row_data(idx, tile),
+                None => {
+                    ids.borrow_mut().push(id);
+                    model.push(tile);
+                }
+            }
+        }
+        s_compositor_tray::TrayUpdate::Remove { id } => {
+            let pos = ids.borrow().iter().position(|x| x == &id);
+            if let Some(idx) = pos {
+                ids.borrow_mut().remove(idx);
+                model.remove(idx);
+            }
+        }
+    }
+}
+
+/// Build a Slint image from a tightly-packed RGBA8 buffer.
+fn image_from_rgba(width: u32, height: u32, pixels: &[u8]) -> slint::Image {
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+    let expected = (width * height * 4) as usize;
+    if pixels.len() >= expected {
+        buf.make_mut_bytes().copy_from_slice(&pixels[..expected]);
+    }
+    slint::Image::from_rgba8(buf)
 }
 
 /// The desktop work area `(x, y, w, h)` in logical pixels: the screen minus the

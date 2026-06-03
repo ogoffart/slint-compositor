@@ -259,8 +259,10 @@ fn file_kind(path: &Path, is_dir: bool) -> &'static str {
         Some("mp3" | "flac" | "wav" | "ogg" | "opus" | "m4a" | "aac") => "audio",
         Some("mp4" | "mkv" | "webm" | "mov" | "avi" | "m4v" | "wmv") => "video",
         Some("zip" | "tar" | "gz" | "bz2" | "xz" | "zst" | "7z" | "rar") => "archive",
-        Some("rs" | "c" | "h" | "cpp" | "py" | "js" | "ts" | "go" | "java" | "sh" | "toml"
-        | "json" | "yaml" | "yml" | "slint" | "html" | "css") => "code",
+        Some(
+            "rs" | "c" | "h" | "cpp" | "py" | "js" | "ts" | "go" | "java" | "sh" | "toml" | "json"
+            | "yaml" | "yml" | "slint" | "html" | "css",
+        ) => "code",
         Some("txt" | "md" | "log" | "rst" | "ini" | "conf") => "text",
         Some("pdf") => "pdf",
         Some("appimage" | "bin" | "run" | "exe") => "exec",
@@ -324,7 +326,10 @@ mod tests {
         assert_eq!(file_kind(Path::new("notes.txt"), false), "text");
         assert_eq!(file_kind(Path::new("a.pdf"), false), "pdf");
         assert_eq!(file_kind(Path::new("a.exe"), false), "exec");
-        assert_eq!(file_kind(Path::new("/nonexistent/unknown.xyz"), false), "file");
+        assert_eq!(
+            file_kind(Path::new("/nonexistent/unknown.xyz"), false),
+            "file"
+        );
     }
 
     #[test]

@@ -31,6 +31,22 @@ impl IconCache {
     }
 }
 
+/// Resolve a bare themed icon name (or absolute path) to an image, or a default
+/// (empty) image if it can't be found. Used for SNI tray items.
+pub fn image_for_icon_name(name: &str) -> slint::Image {
+    if name.is_empty() {
+        return slint::Image::default();
+    }
+    let p = Path::new(name);
+    let path = if p.is_absolute() && p.is_file() {
+        Some(p.to_path_buf())
+    } else {
+        find_icon_file(name)
+    };
+    path.and_then(|p| slint::Image::load_from_path(&p).ok())
+        .unwrap_or_default()
+}
+
 /// Base data directories per the XDG spec (`$XDG_DATA_HOME` + `$XDG_DATA_DIRS`).
 fn data_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
