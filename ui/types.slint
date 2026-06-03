@@ -41,6 +41,13 @@ export struct Place {
     path: string,
 }
 
+// One clickable segment of the breadcrumb path bar; `path` is the absolute path
+// up to and including this segment.
+export struct Crumb {
+    name: string,
+    path: string,
+}
+
 // A start-menu application entry. `kind`: "app" launches `command`, "run" opens
 // the run dialog, "lock" locks the screen, "logout" quits the compositor.
 export struct MenuEntry {

@@ -15,7 +15,7 @@ use std::time::SystemTime;
 use slint::{Model, VecModel};
 
 use crate::ops;
-use crate::{FileItem, Files};
+use crate::{Crumb, FileItem, Files};
 
 /// One directory entry, cached unsorted so re-sorting and toggling hidden files
 /// don't re-read the filesystem.
@@ -56,6 +56,8 @@ pub struct Browser {
     sort_desc: bool,
     /// Whether dotfiles are shown.
     show_hidden: bool,
+    /// Lower-cased name filter from the search box (empty = no filter).
+    filter: String,
 }
 
 /// A shared, reference-counted browser.
@@ -78,12 +80,19 @@ impl Browser {
             sort_key: 0,
             sort_desc: false,
             show_hidden: false,
+            filter: String::new(),
         }
     }
 
-    /// Navigate to an arbitrary path (used by the Places sidebar).
+    /// Navigate to an arbitrary path (used by the Places sidebar / breadcrumb).
     pub fn go_to(&mut self, path: &str) {
         self.navigate(PathBuf::from(path));
+    }
+
+    /// Apply a name filter from the search box (case-insensitive substring).
+    pub fn set_filter(&mut self, text: &str) {
+        self.filter = text.trim().to_lowercase();
+        self.render(true);
     }
 
     /// Set the sort column; clicking the active column again flips direction.
@@ -461,6 +470,11 @@ impl Browser {
                 });
             }
         }
+        // A fresh directory starts unfiltered; clear the search box too.
+        self.filter.clear();
+        if let Some(w) = self.weak.upgrade() {
+            w.set_search_text(Default::default());
+        }
         self.render(false);
         readable
     }
@@ -488,6 +502,7 @@ impl Browser {
             .raw
             .iter()
             .filter(|e| self.show_hidden || !e.name.starts_with('.'))
+            .filter(|e| self.filter.is_empty() || e.name.to_lowercase().contains(&self.filter))
             .cloned()
             .collect();
         let key = self.sort_key;
@@ -555,8 +570,29 @@ impl Browser {
             w.set_sort_key(self.sort_key);
             w.set_sort_desc(self.sort_desc);
             w.set_show_hidden(self.show_hidden);
+            w.set_crumbs(Rc::new(VecModel::from(self.crumbs())).into());
         }
         self.sync();
+    }
+
+    /// Build the breadcrumb segments for the current directory.
+    fn crumbs(&self) -> Vec<Crumb> {
+        use std::path::Component;
+        let mut crumbs = vec![Crumb {
+            name: "/".into(),
+            path: "/".into(),
+        }];
+        let mut acc = PathBuf::from("/");
+        for comp in self.cwd.components() {
+            if let Component::Normal(c) = comp {
+                acc.push(c);
+                crumbs.push(Crumb {
+                    name: c.to_string_lossy().as_ref().into(),
+                    path: acc.to_string_lossy().as_ref().into(),
+                });
+            }
+        }
+        crumbs
     }
 
     fn title_name(&self) -> String {
@@ -838,6 +874,26 @@ mod tests {
         b.set_sort(0);
         b.set_sort(0);
         assert_eq!(names(&b), ["zdir", "b.txt", "a.txt"]);
+    }
+
+    #[test]
+    fn search_filters_by_name() {
+        let dir = scratch();
+        for n in ["apple.txt", "banana.txt", "apricot.md"] {
+            std::fs::write(dir.join(n), "x").unwrap();
+        }
+        let mut b = headless();
+        b.navigate(dir.clone());
+        b.set_filter("AP"); // case-insensitive substring
+        assert_eq!(names(&b), ["apple.txt", "apricot.md"]);
+        b.set_filter("");
+        assert_eq!(names(&b).len(), 3);
+        // Navigating clears the filter.
+        b.set_filter("zzz");
+        assert!(names(&b).is_empty());
+        b.go_up();
+        b.go_to(dir.to_str().unwrap());
+        assert_eq!(names(&b).len(), 3);
     }
 
     #[test]

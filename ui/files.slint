@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { FileItem, Place } from "types.slint";
+import { FileItem, Place, Crumb } from "types.slint";
 import { FileIcon } from "file_icon.slint";
 import { Button, ScrollView, LineEdit } from "std-widgets.slint";
 
@@ -77,6 +77,27 @@ component PlaceRow inherits Rectangle {
     }
 }
 
+// A clickable breadcrumb path segment.
+component BreadcrumbBtn inherits Rectangle {
+    in property <string> label;
+    callback clicked;
+    background: ta.has-hover ? Theme.hover : transparent;
+    border-radius: 4px;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        Text {
+            text: root.label;
+            color: Theme.fg;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
 // A clickable details-view column header showing the active sort arrow.
 component HeaderCell inherits Rectangle {
     in property <string> label;
@@ -151,6 +172,10 @@ export component Files inherits Window {
     in property <bool> sort-desc;
     in property <bool> show-hidden;
     in property <[Place]> places;
+    in property <[Crumb]> crumbs;
+    in-out property <string> search-text;
+    // When true, the breadcrumb is replaced by an editable path field.
+    property <bool> editing-path;
 
     callback go-back();
     callback go-up();
@@ -158,6 +183,7 @@ export component Files inherits Window {
     callback go-to(string);
     callback sort-by(int);
     callback toggle-hidden();
+    callback search(string);
     callback navigate-to(string);
     callback row-pressed(int, bool, bool);  // idx, ctrl, shift
     callback move-cursor(int, bool);        // delta, shift (extend)
@@ -246,21 +272,68 @@ export component Files inherits Window {
                 text: "⌂";
                 clicked => { root.go-home(); keys.focus(); }
             }
+            // Path area: clickable breadcrumb, or an editable field.
             Rectangle {
                 horizontal-stretch: 1;
                 background: Theme.surface;
                 border-radius: 6px;
                 border-width: 1px;
                 border-color: Theme.hover;
-                HorizontalLayout {
+                clip: true;
+                if !root.editing-path: HorizontalLayout {
+                    padding-left: 4px;
+                    padding-right: 4px;
+                    alignment: start;
+                    for crumb[i] in root.crumbs: HorizontalLayout {
+                        VerticalLayout {
+                            alignment: center;
+                            if i > 0: Text {
+                                text: "›";
+                                color: Theme.subtext;
+                                font-size: 13px;
+                                width: 14px;
+                                horizontal-alignment: center;
+                            }
+                        }
+                        BreadcrumbBtn {
+                            label: crumb.name;
+                            clicked => { root.go-to(crumb.path); keys.focus(); }
+                        }
+                    }
+                }
+                if root.editing-path: HorizontalLayout {
                     padding: 2px;
                     path-edit := LineEdit {
                         text: root.path;
                         placeholder-text: "Type a path…";
+                        init => { self.focus(); self.select-all(); }
                         accepted(text) => {
                             root.navigate-to(text);
+                            root.editing-path = false;
                             keys.focus();
                         }
+                    }
+                }
+            }
+            Button {
+                text: root.editing-path ? "✓" : "✎";
+                clicked => {
+                    root.editing-path = !root.editing-path;
+                    if (!root.editing-path) { keys.focus(); }
+                }
+            }
+            Rectangle {
+                width: 158px;
+                background: Theme.surface;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Theme.hover;
+                HorizontalLayout {
+                    padding: 2px;
+                    search := LineEdit {
+                        placeholder-text: "Search";
+                        text <=> root.search-text;
+                        edited(t) => { root.search(t); }
                     }
                 }
             }
@@ -319,6 +392,16 @@ export component Files inherits Window {
                 }
                 if (e.modifiers.control && (e.text == "h" || e.text == "H")) {
                     root.toggle-hidden();
+                    return EventResult.accept;
+                }
+                if (e.modifiers.control && (e.text == "f" || e.text == "F")) {
+                    search.focus();
+                    return EventResult.accept;
+                }
+                if (e.text == Key.Escape) {
+                    root.search-text = "";
+                    root.search("");
+                    root.editing-path = false;
                     return EventResult.accept;
                 }
                 if (e.text == Key.Delete) {

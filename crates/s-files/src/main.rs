@@ -82,6 +82,10 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let b = browser.clone();
+        window.on_search(move |text| b.borrow_mut().set_filter(text.as_str()));
+    }
+    {
+        let b = browser.clone();
         window.on_go_to(move |path| b.borrow_mut().go_to(path.as_str()));
     }
     {
@@ -159,6 +163,9 @@ mod screenshot {
         // Optionally apply a sort column (clicked again = descending).
         if let Some(s) = std::env::var("SFILES_SHOT_SORT").ok().and_then(|v| v.parse::<i32>().ok()) {
             browser.borrow_mut().set_sort(s);
+        }
+        if let Ok(f) = std::env::var("SFILES_SHOT_FILTER") {
+            browser.borrow_mut().set_filter(&f);
         }
         // Optionally Shift-select rows 0..=N to show multi-selection.
         if let Some(n) = std::env::var("SFILES_SHOT_RANGE")
