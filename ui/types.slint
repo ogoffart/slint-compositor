@@ -22,11 +22,15 @@ export struct LayerTile {
 
 // An entry in the file dialog's current directory. `kind` is a coarse type used
 // to pick an icon: "dir", "image", "audio", "video", "archive", "code", "text",
-// "pdf", "exec" or "file".
+// "pdf", "exec" or "file". `size`/`modified` are pre-formatted for the details
+// view; `thumb` is a small image preview for image files (empty otherwise).
 export struct FileItem {
     name: string,
     is-dir: bool,
     kind: string,
+    size: string,
+    modified: string,
+    thumb: image,
 }
 
 // A start-menu application entry. `kind`: "app" launches `command`, "run" opens

@@ -13,6 +13,7 @@ path = "src/main.rs"
 slint.workspace = true
 log.workspace = true
 env_logger.workspace = true
+chrono.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true

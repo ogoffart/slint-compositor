@@ -102,11 +102,17 @@ mod screenshot {
         let out =
             std::env::var("SFILES_SHOT_OUT").unwrap_or_else(|_| "/tmp/sfiles-testing.png".into());
 
+        let view: i32 = std::env::var("SFILES_SHOT_VIEW")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         let files = Files::new().unwrap();
         let items = Rc::new(VecModel::<FileItem>::default());
         files.set_items(items.clone().into());
         let browser = Rc::new(RefCell::new(Browser::new(files.as_weak(), items)));
         browser.borrow_mut().navigate(PathBuf::from(&dir));
+        files.set_view(view);
         files.show().unwrap();
         files.window().request_redraw();
 
