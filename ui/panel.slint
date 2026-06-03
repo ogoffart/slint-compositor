@@ -1,5 +1,6 @@
 import { Theme } from "theme.slint";
 import { Clock } from "clock.slint";
+import { Eyes } from "eyes.slint";
 import { WindowTile } from "types.slint";
 
 // A single icon button in the panel.
@@ -50,7 +51,10 @@ component TaskItem inherits Rectangle {
 export component Panel inherits Rectangle {
     in property <bool> horizontal;
     in property <[WindowTile]> windows;
-    in property <string> clock-time;
+    in property <string> clock-hours;
+    in property <string> clock-minutes;
+    in property <length> cursor-x;
+    in property <length> cursor-y;
     callback toggle-launcher();
     callback toggle-settings();
     callback activate(int);
@@ -72,7 +76,8 @@ export component Panel inherits Rectangle {
             height: 40px;
             clicked => { root.toggle-settings(); }
         }
-        Clock { time: root.clock-time; }
+        Clock { hours: root.clock-hours; minutes: root.clock-minutes; }
+        Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
         Rectangle { height: 1px; background: Theme.surface; }
         VerticalLayout {
             vertical-stretch: 1;
@@ -102,7 +107,8 @@ export component Panel inherits Rectangle {
             width: 40px;
             clicked => { root.toggle-settings(); }
         }
-        Clock { time: root.clock-time; }
+        Clock { hours: root.clock-hours; minutes: root.clock-minutes; }
+        Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
         Rectangle { width: 1px; background: Theme.surface; }
         HorizontalLayout {
             horizontal-stretch: 1;

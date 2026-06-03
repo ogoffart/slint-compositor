@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { Button } from "std-widgets.slint";
+import { Button, SpinBox } from "std-widgets.slint";
 
 // Settings dialog: colour scheme, accent, panel placement/size, background.
 export component Settings inherits Rectangle {
@@ -131,26 +131,21 @@ export component Settings inherits Rectangle {
                     vertical-alignment: center;
                     width: 110px;
                 }
-                Button {
-                    text: "−";
-                    clicked => {
-                        root.panel-size = max(40px, root.panel-size - 8px);
+                SpinBox {
+                    horizontal-stretch: 1;
+                    minimum: 40;
+                    maximum: 240;
+                    step-size: 8;
+                    value: round(root.panel-size / 1px);
+                    edited(v) => {
+                        root.panel-size = v * 1px;
                         root.changed();
                     }
                 }
                 Text {
-                    text: round(root.panel-size / 1px) + " px";
+                    text: "px";
                     color: Theme.fg;
                     vertical-alignment: center;
-                    horizontal-alignment: center;
-                    width: 70px;
-                }
-                Button {
-                    text: "+";
-                    clicked => {
-                        root.panel-size = min(240px, root.panel-size + 8px);
-                        root.changed();
-                    }
                 }
             }
 
