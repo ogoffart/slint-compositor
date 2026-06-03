@@ -22,6 +22,7 @@ component WindowFrame inherits Rectangle {
     callback minimize();
     callback toggle-maximize();
     callback moved(length, length);              // title-bar drag delta
+    callback dragging(length, length);           // cursor pos during a drag
     callback dropped(length, length);            // cursor pos when a drag ends
     callback resized(length, length);            // resize-grip drag delta
     callback focus-requested();                  // raise + focus
@@ -78,6 +79,7 @@ component WindowFrame inherits Rectangle {
                 mouse-cursor: move;
                 moved => {
                     root.moved(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                    root.dragging(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                 }
                 pointer-event(e) => {
                     // On release, report the cursor position so the shell can
@@ -285,6 +287,16 @@ export component Desktop inherits Window {
     in property <image> background-image;
     in-out property <int> panel-edge: 0;        // 0=Right 1=Left 2=Top 3=Bottom
     in-out property <length> panel-size: 72px;
+
+    // Work area (screen minus the panel), used for the snap preview.
+    property <length> work-x: root.panel-edge == 1 ? root.panel-size : 0;
+    property <length> work-y: root.panel-edge == 2 ? root.panel-size : 0;
+    property <length> work-w: (root.panel-edge == 0 || root.panel-edge == 1)
+        ? root.width - root.panel-size : root.width;
+    property <length> work-h: (root.panel-edge == 2 || root.panel-edge == 3)
+        ? root.height - root.panel-size : root.height;
+    // Drag snap preview zone: 0=none, 1=left, 2=right, 3=maximize.
+    in-out property <int> snap-preview: 0;
     in-out property <int> active-workspace: 0;
     in property <int> workspace-count: 4;
     in-out property <bool> launcher-visible: false;
@@ -475,6 +487,18 @@ export component Desktop inherits Window {
         image-fit: fill;
     }
 
+    // Snap preview: a translucent highlight of where a dragged window will land.
+    if root.snap-preview != 0: Rectangle {
+        x: root.snap-preview == 2 ? root.work-x + root.work-w / 2 : root.work-x;
+        y: root.work-y;
+        width: root.snap-preview == 3 ? root.work-w : root.work-w / 2;
+        height: root.work-h;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        background: Theme.accent.with-alpha(0.22);
+    }
+
     for win in root.windows: WindowFrame {
         tile: win;
         on-active-workspace: win.workspace == root.active-workspace;
@@ -490,7 +514,11 @@ export component Desktop inherits Window {
         moved(dx, dy) => {
             root.move-window(win.id, dx, dy);
         }
+        dragging(cx, cy) => {
+            root.snap-preview = cy <= 16px ? 3 : cx <= 16px ? 1 : cx >= root.width - 16px ? 2 : 0;
+        }
         dropped(cx, cy) => {
+            root.snap-preview = 0;
             root.drop-window(win.id, cx, cy);
         }
         resized(dw, dh) => {

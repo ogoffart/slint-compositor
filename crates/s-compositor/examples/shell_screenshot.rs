@@ -137,6 +137,11 @@ fn main() {
         "shot_top_panel.png",
     );
 
+    // Snap preview (left half) — shown while dragging a window to an edge.
+    ui.set_snap_preview(1);
+    save(&ui, &window, PhysicalSize::new(1100, 720), "shot_snap.png");
+    ui.set_snap_preview(0);
+
     // 2. Narrow right panel: clock stacks onto two lines.
     ui.set_panel_edge(0); // Right
     ui.set_panel_size(56.0);
