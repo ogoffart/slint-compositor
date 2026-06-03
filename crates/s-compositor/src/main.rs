@@ -721,8 +721,11 @@ fn main() -> anyhow::Result<()> {
 
     // Keyboard: forward each press as a (modifier-wrapped) key tap.
     // Returns true if the key event matched a shortcut (and was consumed).
-    // When was the volume OSD last shown (drives its auto-hide).
+    // When the volume OSD / Alt-Tab switcher were last shown (drive auto-hide).
     let osd_until: Rc<RefCell<Option<std::time::Instant>>> = Rc::new(RefCell::new(None));
+    let switcher_until: Rc<RefCell<Option<std::time::Instant>>> = Rc::new(RefCell::new(None));
+    let switcher_model = Rc::new(VecModel::<WindowTile>::default());
+    desktop.set_switcher_windows(ModelRc::from(switcher_model.clone()));
     let run_binding: Rc<dyn Fn(&str, bool, bool, bool, bool) -> bool> = {
         let keybinds = keybinds.clone();
         let weak = desktop.as_weak();
@@ -733,6 +736,8 @@ fn main() -> anyhow::Result<()> {
         let vol_tx = vol_cmd_tx.clone();
         let notif = notif.clone();
         let osd_until = osd_until.clone();
+        let switcher_until = switcher_until.clone();
+        let switcher_model = switcher_model.clone();
         Rc::new(move |text: &str, ctrl, alt, shift, meta| {
             let key = keybind::normalize_text(text);
             let Some(bind) = keybinds
@@ -761,6 +766,21 @@ fn main() -> anyhow::Result<()> {
                 ) {
                     d.set_osd_visible(true);
                     *osd_until.borrow_mut() =
+                        Some(std::time::Instant::now() + Duration::from_millis(1200));
+                }
+                // Flash the Alt-Tab switcher when cycling windows.
+                if matches!(
+                    bind.action,
+                    keybind::Action::NextWindow | keybind::Action::PrevWindow
+                ) {
+                    let ws = d.get_active_workspace();
+                    let items: Vec<WindowTile> = (0..model.row_count())
+                        .filter_map(|i| model.row_data(i))
+                        .filter(|t| t.workspace == ws && !t.minimized)
+                        .collect();
+                    switcher_model.set_vec(items);
+                    d.set_switcher_visible(true);
+                    *switcher_until.borrow_mut() =
                         Some(std::time::Instant::now() + Duration::from_millis(1200));
                 }
             }
@@ -846,6 +866,7 @@ fn main() -> anyhow::Result<()> {
         let wifi_model = wifi_model.clone();
         let notif = notif.clone();
         let osd_until = osd_until.clone();
+        let switcher_until = switcher_until.clone();
         move || {
             let mut dirty = false;
 
@@ -857,6 +878,17 @@ fn main() -> anyhow::Result<()> {
                 *osd_until.borrow_mut() = None;
                 if let Some(d) = weak.upgrade() {
                     d.set_osd_visible(false);
+                    dirty = true;
+                }
+            }
+            // Auto-hide the Alt-Tab switcher.
+            let switcher_expired = switcher_until
+                .borrow()
+                .is_some_and(|t| std::time::Instant::now() >= t);
+            if switcher_expired {
+                *switcher_until.borrow_mut() = None;
+                if let Some(d) = weak.upgrade() {
+                    d.set_switcher_visible(false);
                     dirty = true;
                 }
             }

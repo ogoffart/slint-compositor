@@ -8,6 +8,7 @@ import { Notifications } from "notifications.slint";
 import { NotificationCenter } from "notification_center.slint";
 import { CalendarPopover } from "calendar.slint";
 import { DesktopMenu } from "desktop_menu.slint";
+import { WindowSwitcher } from "window_switcher.slint";
 import { Osd } from "osd.slint";
 import { Settings } from "settings.slint";
 import { FileDialog } from "file_dialog.slint";
@@ -312,6 +313,9 @@ export component Desktop inherits Window {
     in-out property <bool> quick-settings-visible: false;
     // Transient volume on-screen display (shown when changed via the keyboard).
     in-out property <bool> osd-visible: false;
+    // Transient Alt-Tab window switcher (pre-filtered list built by the host).
+    in-out property <bool> switcher-visible: false;
+    in property <[WindowTile]> switcher-windows;
 
     // System tray + quick settings (volume / Wi-Fi), driven from Rust.
     in property <[TrayIcon]> tray-icons;
@@ -649,6 +653,14 @@ export component Desktop inherits Window {
         dismiss => {
             root.notification-center-visible = false;
         }
+    }
+
+    if root.switcher-visible: WindowSwitcher {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        windows: root.switcher-windows;
     }
 
     if root.osd-visible: Osd {

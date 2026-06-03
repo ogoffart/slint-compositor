@@ -142,6 +142,40 @@ fn main() {
     save(&ui, &window, PhysicalSize::new(1100, 720), "shot_snap.png");
     ui.set_snap_preview(0);
 
+    // Alt-Tab window switcher.
+    ui.set_switcher_windows(
+        Rc::new(slint::VecModel::from(vec![
+            WindowTile {
+                id: 1,
+                title: "Terminal".into(),
+                icon: solid_icon(0x89, 0xb4, 0xfa),
+                focused: true,
+                ..Default::default()
+            },
+            WindowTile {
+                id: 2,
+                title: "Editor".into(),
+                icon: solid_icon(0xa6, 0xe3, 0xa1),
+                ..Default::default()
+            },
+            WindowTile {
+                id: 3,
+                title: "Browser".into(),
+                icon: solid_icon(0xf9, 0xe2, 0xaf),
+                ..Default::default()
+            },
+        ]))
+        .into(),
+    );
+    ui.set_switcher_visible(true);
+    save(
+        &ui,
+        &window,
+        PhysicalSize::new(1100, 720),
+        "shot_switcher.png",
+    );
+    ui.set_switcher_visible(false);
+
     // 2. Narrow right panel: clock stacks onto two lines.
     ui.set_panel_edge(0); // Right
     ui.set_panel_size(56.0);

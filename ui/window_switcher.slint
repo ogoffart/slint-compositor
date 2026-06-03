@@ -1,0 +1,53 @@
+import { Theme } from "theme.slint";
+import { WindowTile } from "types.slint";
+
+// A transient Alt-Tab style switcher: shows a pre-filtered list of windows with
+// the focused one highlighted. Click-through; auto-hidden by the host.
+export component WindowSwitcher inherits Rectangle {
+    in property <[WindowTile]> windows;
+
+    background: #00000055;
+
+    Rectangle {
+        width: row.preferred-width;
+        height: row.preferred-height;
+        background: Theme.bg;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: Theme.hover;
+
+        row := HorizontalLayout {
+            padding: 14px;
+            spacing: 10px;
+            for win in root.windows: Rectangle {
+                width: 130px;
+                height: 100px;
+                border-radius: 10px;
+                background: win.focused ? Theme.surface : transparent;
+                border-width: win.focused ? 2px : 0px;
+                border-color: Theme.accent;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 8px;
+                    alignment: center;
+                    HorizontalLayout {
+                        alignment: center;
+                        Image {
+                            source: win.icon;
+                            width: 44px;
+                            height: 44px;
+                            image-fit: contain;
+                        }
+                    }
+                    Text {
+                        text: win.title == "" ? "(untitled)" : win.title;
+                        color: Theme.fg;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+}
