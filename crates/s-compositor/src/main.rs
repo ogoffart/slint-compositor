@@ -90,7 +90,35 @@ fn main() -> anyhow::Result<()> {
             })
             .collect::<Vec<_>>(),
     ))));
-    desktop.set_files_command(config::file_manager_command().into());
+
+    // Desktop shortcuts and panel quick-launch buttons (configurable; seeded
+    // with sensible defaults when the config doesn't specify any).
+    let to_entries = |apps: &[config::AppEntry]| {
+        apps.iter()
+            .map(|a| MenuEntry {
+                icon: a.icon.clone().into(),
+                name: a.name.clone().into(),
+                command: a.command.clone().into(),
+                kind: "app".into(),
+            })
+            .collect::<Vec<_>>()
+    };
+    let desktop_apps: Rc<Vec<config::AppEntry>> = Rc::new(if loaded.desktop.is_empty() {
+        config::discover_shortcuts()
+    } else {
+        loaded.desktop.clone()
+    });
+    let panel_apps: Rc<Vec<config::AppEntry>> = Rc::new(if loaded.panel_apps.is_empty() {
+        vec![config::AppEntry {
+            icon: "🗂".to_string(),
+            name: "Files".to_string(),
+            command: config::file_manager_command(),
+        }]
+    } else {
+        loaded.panel_apps.clone()
+    });
+    desktop.set_desktop_icons(ModelRc::from(Rc::new(VecModel::from(to_entries(&desktop_apps)))));
+    desktop.set_panel_launchers(ModelRc::from(Rc::new(VecModel::from(to_entries(&panel_apps)))));
 
     // Lock-screen password (empty = unlock on Enter).
     let lock_password: Rc<RefCell<String>> = Rc::new(RefCell::new(loaded.lock_password.clone()));
@@ -203,12 +231,16 @@ fn main() -> anyhow::Result<()> {
         let weak = desktop.as_weak();
         let bg_path = bg_path.clone();
         let menu_apps = menu_apps.clone();
+        let desktop_apps = desktop_apps.clone();
+        let panel_apps = panel_apps.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
         move || {
             let weak = weak.clone();
             let bg_path = bg_path.clone();
             let menu_apps = menu_apps.clone();
+            let desktop_apps = desktop_apps.clone();
+            let panel_apps = panel_apps.clone();
             let lock_password = lock_password.clone();
             let keybinds = keybinds.clone();
             file_dialog.borrow_mut().open(
@@ -221,8 +253,16 @@ fn main() -> anyhow::Result<()> {
                             Ok(image) => {
                                 d.set_background_image(image);
                                 *bg_path.borrow_mut() = Some(path.to_string_lossy().into_owned());
-                                current_config(&d, &bg_path, &menu_apps, &lock_password, &keybinds)
-                                    .save();
+                                current_config(
+                                    &d,
+                                    &bg_path,
+                                    &menu_apps,
+                                    &desktop_apps,
+                                    &panel_apps,
+                                    &lock_password,
+                                    &keybinds,
+                                )
+                                .save();
                             }
                             Err(err) => log::error!("failed to load image {path:?}: {err}"),
                         }
@@ -238,11 +278,22 @@ fn main() -> anyhow::Result<()> {
         let bg_path = bg_path.clone();
         let appearance_tx = appearance_tx.clone();
         let menu_apps = menu_apps.clone();
+        let desktop_apps = desktop_apps.clone();
+        let panel_apps = panel_apps.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
         move || {
             if let Some(d) = weak.upgrade() {
-                current_config(&d, &bg_path, &menu_apps, &lock_password, &keybinds).save();
+                current_config(
+                    &d,
+                    &bg_path,
+                    &menu_apps,
+                    &desktop_apps,
+                    &panel_apps,
+                    &lock_password,
+                    &keybinds,
+                )
+                .save();
                 let _ = appearance_tx.try_send(current_appearance(&d));
             }
         }
@@ -1339,6 +1390,8 @@ fn current_config(
     d: &Desktop,
     bg: &Rc<RefCell<Option<String>>>,
     menu: &Rc<Vec<config::AppEntry>>,
+    desktop: &Rc<Vec<config::AppEntry>>,
+    panel_apps: &Rc<Vec<config::AppEntry>>,
     lock_password: &Rc<RefCell<String>>,
     keybinds: &Rc<Vec<keybind::Keybind>>,
 ) -> config::Config {
@@ -1350,6 +1403,8 @@ fn current_config(
         panel_size: d.get_panel_size(),
         background: bg.borrow().clone(),
         menu: (**menu).clone(),
+        desktop: (**desktop).clone(),
+        panel_apps: (**panel_apps).clone(),
         lock_password: lock_password.borrow().clone(),
         keybinds: (**keybinds).clone(),
     }
@@ -1830,5 +1885,76 @@ mod tests {
         assert_eq!(evdev_button(2), 0x111); // right
         assert_eq!(evdev_button(3), 0x112); // middle
         assert_eq!(evdev_button(0), 0x110); // fallback
+    }
+}
+
+#[cfg(test)]
+mod shot {
+    //! Opt-in headless render of the desktop scene (set `SCOMP_SHOT=1`), to
+    //! review the wallpaper layer — desktop shortcuts and the panel — without a
+    //! display server. Uses Slint's software renderer, like the `s-files` test.
+    use super::*;
+    use slint::platform::software_renderer::{
+        MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType,
+    };
+    use slint::platform::{Platform, WindowAdapter};
+    use std::rc::Rc;
+
+    struct SwPlatform {
+        window: Rc<MinimalSoftwareWindow>,
+    }
+    impl Platform for SwPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(self.window.clone())
+        }
+    }
+
+    #[test]
+    fn desktop_shortcuts() {
+        if std::env::var("SCOMP_SHOT").is_err() {
+            return;
+        }
+        let (w, h) = (1280u32, 800u32);
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        slint::platform::set_platform(Box::new(SwPlatform { window: window.clone() })).unwrap();
+        window.set_size(slint::PhysicalSize::new(w, h));
+
+        let d = Desktop::new().unwrap();
+        let model = |items: Vec<(&str, &str, &str)>| {
+            ModelRc::from(Rc::new(VecModel::from(
+                items
+                    .into_iter()
+                    .map(|(i, n, c)| MenuEntry {
+                        icon: i.into(),
+                        name: n.into(),
+                        command: c.into(),
+                        kind: "app".into(),
+                    })
+                    .collect::<Vec<_>>(),
+            )))
+        };
+        d.set_desktop_icons(model(vec![
+            ("🗂", "Files", "s-files"),
+            ("🖥", "Terminal", "alacritty"),
+            ("🌐", "Browser", "firefox"),
+        ]));
+        d.set_panel_launchers(model(vec![("🗂", "Files", "s-files")]));
+        d.show().unwrap();
+        window.window().request_redraw();
+
+        let mut buf = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
+        window.draw_if_needed(|r| {
+            r.render(&mut buf, w as usize);
+        });
+        let mut rgba = Vec::with_capacity(buf.len() * 4);
+        for p in &buf {
+            let a = p.alpha;
+            let u = |c: u8| if a == 0 || a == 255 { c } else { ((c as u16 * 255) / a as u16) as u8 };
+            rgba.extend_from_slice(&[u(p.red), u(p.green), u(p.blue), a]);
+        }
+        image::save_buffer("/tmp/desktop-icons.png", &rgba, w, h, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        eprintln!("wrote /tmp/desktop-icons.png");
+        d.hide().unwrap();
     }
 }

@@ -24,6 +24,10 @@ pub struct Config {
     pub background: Option<String>,
     /// Start-menu apps. When empty, the defaults are auto-discovered at startup.
     pub menu: Vec<AppEntry>,
+    /// Desktop shortcut icons. When empty, a default set is seeded at startup.
+    pub desktop: Vec<AppEntry>,
+    /// Panel quick-launch buttons. When empty, a default set is seeded at startup.
+    pub panel_apps: Vec<AppEntry>,
     /// Lock-screen password; empty means the lock unlocks on Enter.
     pub lock_password: String,
     /// Global keyboard shortcuts. When empty, the defaults are used at startup.
@@ -39,6 +43,8 @@ impl Default for Config {
             panel_size: 72.0,
             background: None,
             menu: Vec::new(),
+            desktop: Vec::new(),
+            panel_apps: Vec::new(),
             lock_password: String::new(),
             keybinds: Vec::new(),
         }
@@ -61,6 +67,38 @@ fn bundled(bin: &str) -> Option<String> {
     candidate
         .is_file()
         .then(|| candidate.to_string_lossy().into_owned())
+}
+
+/// Default desktop / panel shortcuts: a file manager, a terminal and a browser,
+/// using whatever is installed. The file manager prefers our bundled `s-files`.
+pub fn discover_shortcuts() -> Vec<AppEntry> {
+    let mut apps = vec![AppEntry {
+        icon: "🗂".to_string(),
+        name: "Files".to_string(),
+        command: file_manager_command(),
+    }];
+    let pick = |apps: &mut Vec<AppEntry>, icon: &str, name: &str, candidates: &[&str]| {
+        if let Some(bin) = candidates.iter().find(|b| on_path(b)) {
+            apps.push(AppEntry {
+                icon: icon.to_string(),
+                name: name.to_string(),
+                command: bin.to_string(),
+            });
+        }
+    };
+    pick(
+        &mut apps,
+        "🖥",
+        "Terminal",
+        &["alacritty", "foot", "kitty", "wezterm", "gnome-terminal", "xterm"],
+    );
+    pick(
+        &mut apps,
+        "🌐",
+        "Browser",
+        &["firefox", "chromium", "google-chrome", "brave", "epiphany"],
+    );
+    apps
 }
 
 /// The command to launch a file manager: our bundled `s-files` when available,
@@ -204,6 +242,19 @@ impl Config {
                 app.icon, app.name, app.command
             ));
         }
+        // Desktop shortcut icons and panel quick-launch buttons, same format.
+        for app in &self.desktop {
+            text.push_str(&format!(
+                "desktop = {} | {} | {}\n",
+                app.icon, app.name, app.command
+            ));
+        }
+        for app in &self.panel_apps {
+            text.push_str(&format!(
+                "panel = {} | {} | {}\n",
+                app.icon, app.name, app.command
+            ));
+        }
         // Keyboard shortcuts: `bind = <combo> = <action>`.
         for bind in &self.keybinds {
             text.push_str(&format!("bind = {}\n", bind.to_config_string()));
@@ -247,17 +298,18 @@ impl Config {
                         self.keybinds.push(b);
                     }
                 }
-                "app" => {
+                "app" | "desktop" | "panel" => {
                     let mut parts = value.splitn(3, '|').map(|p| p.trim().to_string());
                     if let (Some(icon), Some(name), Some(command)) =
                         (parts.next(), parts.next(), parts.next())
                     {
                         if !command.is_empty() {
-                            self.menu.push(AppEntry {
-                                icon,
-                                name,
-                                command,
-                            });
+                            let entry = AppEntry { icon, name, command };
+                            match key.trim() {
+                                "desktop" => self.desktop.push(entry),
+                                "panel" => self.panel_apps.push(entry),
+                                _ => self.menu.push(entry),
+                            }
                         }
                     }
                 }
@@ -292,6 +344,16 @@ mod tests {
                     command: "foot".to_string(),
                 },
             ],
+            desktop: vec![AppEntry {
+                icon: "🗂".to_string(),
+                name: "Files".to_string(),
+                command: "s-files".to_string(),
+            }],
+            panel_apps: vec![AppEntry {
+                icon: "🖥".to_string(),
+                name: "Terminal".to_string(),
+                command: "alacritty".to_string(),
+            }],
             keybinds: vec![
                 crate::keybind::parse("Super+d = start-menu").unwrap(),
                 crate::keybind::parse("Super+Equal = volume-up").unwrap(),
