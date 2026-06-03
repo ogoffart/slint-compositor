@@ -14,12 +14,12 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::Display;
+use smithay::reexports::wayland_server::{BindError, ListeningSocket};
 use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
-use smithay::wayland::socket::ListeningSocketSource;
 
 mod handlers;
 mod state;
@@ -38,6 +38,9 @@ pub enum Event {
     /// The compositor is up and accepting clients on the given `WAYLAND_DISPLAY`.
     Ready {
         socket_name: String,
+        /// The directory the socket lives in; launched apps need this as their
+        /// `XDG_RUNTIME_DIR` to find it.
+        runtime_dir: String,
     },
     WindowAdded(WindowId),
     WindowRemoved(WindowId),
@@ -82,9 +85,13 @@ pub fn command_channel() -> (
 impl std::fmt::Debug for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Event::Ready { socket_name } => f
+            Event::Ready {
+                socket_name,
+                runtime_dir,
+            } => f
                 .debug_struct("Ready")
                 .field("socket_name", socket_name)
+                .field("runtime_dir", runtime_dir)
                 .finish(),
             Event::WindowAdded(id) => f.debug_tuple("WindowAdded").field(id).finish(),
             Event::WindowRemoved(id) => f.debug_tuple("WindowRemoved").field(id).finish(),
@@ -182,19 +189,26 @@ pub fn run(
         events: events.clone(),
     };
 
-    // Listen for new clients on an auto-selected wayland socket.
-    let source = ListeningSocketSource::new_auto().context("failed to create wayland socket")?;
-    let socket_name = source.socket_name().to_string_lossy().into_owned();
+    // Create the listening socket, falling back to a private directory if
+    // XDG_RUNTIME_DIR is not writable (e.g. sandboxes, unusual sessions).
+    let (socket, socket_name, runtime_dir) =
+        bind_socket().context("failed to create wayland socket")?;
     let handle = event_loop.handle();
     handle
-        .insert_source(source, move |client_stream, _, state: &mut SlickState| {
-            if let Err(err) = state
-                .display_handle
-                .insert_client(client_stream, state::ClientState::arc())
-            {
-                log::warn!("failed to accept client: {err}");
-            }
-        })
+        .insert_source(
+            Generic::new(socket, Interest::READ, Mode::Level),
+            move |_, socket, state: &mut SlickState| {
+                while let Some(stream) = socket.accept()? {
+                    if let Err(err) = state
+                        .display_handle
+                        .insert_client(stream, state::ClientState::arc())
+                    {
+                        log::warn!("failed to accept client: {err}");
+                    }
+                }
+                Ok::<_, std::io::Error>(PostAction::Continue)
+            },
+        )
         .map_err(|e| anyhow::anyhow!("failed to insert socket source: {e}"))?;
 
     // Dispatch client requests when the display fd becomes readable.
@@ -241,9 +255,10 @@ pub fn run(
         )
         .map_err(|e| anyhow::anyhow!("failed to insert frame timer: {e}"))?;
 
-    log::info!("slick compositor listening on {socket_name}");
+    log::info!("slick compositor listening on {runtime_dir}/{socket_name}");
     let _ = events.send(Event::Ready {
         socket_name: socket_name.clone(),
+        runtime_dir: runtime_dir.clone(),
     });
 
     event_loop
@@ -255,4 +270,53 @@ pub fn run(
         .context("event loop terminated unexpectedly")?;
 
     Ok(())
+}
+
+/// Bind the compositor's listening socket. Tries `XDG_RUNTIME_DIR` first, then
+/// falls back to a private `slick-<uid>` directory under the temp dir if that is
+/// not writable. Returns the socket plus its name and directory.
+fn bind_socket() -> anyhow::Result<(ListeningSocket, String, String)> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::path::PathBuf;
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        let path = PathBuf::from(&dir);
+        if path.is_absolute() {
+            candidates.push(path);
+        }
+    }
+    let uid = std::fs::metadata("/proc/self")
+        .map(|m| m.uid())
+        .unwrap_or(0);
+    let fallback = std::env::temp_dir().join(format!("slick-{uid}"));
+    candidates.push(fallback.clone());
+
+    let mut last_err: Option<String> = None;
+    for dir in candidates {
+        if dir == fallback {
+            if let Err(err) = std::fs::create_dir_all(&dir) {
+                last_err = Some(format!("create {}: {err}", dir.display()));
+                continue;
+            }
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        for n in 1..33u32 {
+            let name = format!("wayland-{n}");
+            match ListeningSocket::bind_absolute(dir.join(&name)) {
+                Ok(socket) => {
+                    return Ok((socket, name, dir.to_string_lossy().into_owned()));
+                }
+                Err(BindError::AlreadyInUse) => continue,
+                Err(err) => {
+                    last_err = Some(format!("{}: {err}", dir.display()));
+                    break;
+                }
+            }
+        }
+    }
+    anyhow::bail!(
+        "no writable runtime directory for the wayland socket ({})",
+        last_err.unwrap_or_else(|| "unknown".into())
+    )
 }

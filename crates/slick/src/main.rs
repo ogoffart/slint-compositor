@@ -50,7 +50,8 @@ fn main() -> anyhow::Result<()> {
     desktop.set_windows(ModelRc::from(model.clone()));
     let windows = Rc::new(RefCell::new(Windows::default()));
     let bridge = Rc::new(RefCell::new(GlBridge::default()));
-    let socket_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    // (WAYLAND_DISPLAY, XDG_RUNTIME_DIR) of slick's compositor, learned from Ready.
+    let wayland_env: Rc<RefCell<Option<(String, String)>>> = Rc::new(RefCell::new(None));
 
     // Upload client frames into shared GL textures during rendering, where the
     // GL context is current, and hand them to Slint as borrowed textures.
@@ -107,8 +108,12 @@ fn main() -> anyhow::Result<()> {
 
     // Launcher: run an arbitrary command, pointed at our compositor socket.
     desktop.on_launch({
-        let socket_name = socket_name.clone();
-        move |cmd| spawn_command(cmd.as_str(), socket_name.borrow().as_deref())
+        let wayland_env = wayland_env.clone();
+        move |cmd| {
+            let env = wayland_env.borrow();
+            let env = env.as_ref().map(|(d, r)| (d.as_str(), r.as_str()));
+            spawn_command(cmd.as_str(), env);
+        }
     });
 
     // Clock: refresh once a second.
@@ -134,11 +139,11 @@ fn main() -> anyhow::Result<()> {
         let weak = desktop.as_weak();
         let windows = windows.clone();
         let model = model.clone();
-        let socket_name = socket_name.clone();
+        let wayland_env = wayland_env.clone();
         move || {
             let mut dirty = false;
             while let Ok(event) = rx.try_recv() {
-                dirty |= handle_event(event, &model, &windows, &socket_name);
+                dirty |= handle_event(event, &model, &windows, &wayland_env);
             }
             if dirty {
                 if let Some(d) = weak.upgrade() {
@@ -157,13 +162,18 @@ fn handle_event(
     event: slick_wayland::Event,
     model: &Rc<VecModel<WindowTile>>,
     windows: &Rc<RefCell<Windows>>,
-    socket_name: &Rc<RefCell<Option<String>>>,
+    wayland_env: &Rc<RefCell<Option<(String, String)>>>,
 ) -> bool {
     use slick_wayland::Event;
     match event {
-        Event::Ready { socket_name: name } => {
-            log::info!("compositor ready on WAYLAND_DISPLAY={name}");
-            *socket_name.borrow_mut() = Some(name);
+        Event::Ready {
+            socket_name,
+            runtime_dir,
+        } => {
+            log::info!(
+                "compositor ready on WAYLAND_DISPLAY={socket_name} (XDG_RUNTIME_DIR={runtime_dir})"
+            );
+            *wayland_env.borrow_mut() = Some((socket_name, runtime_dir));
             false
         }
         Event::WindowBuffer {
@@ -237,9 +247,9 @@ fn handle_event(
     }
 }
 
-/// Spawn a shell command detached, with `WAYLAND_DISPLAY` pointed at our
-/// compositor so launched apps connect to us.
-fn spawn_command(cmd: &str, wayland_display: Option<&str>) {
+/// Spawn a shell command detached, pointed at slick's compositor. `wayland` is
+/// `(WAYLAND_DISPLAY, XDG_RUNTIME_DIR)` of slick's own socket.
+fn spawn_command(cmd: &str, wayland: Option<(&str, &str)>) {
     let cmd = cmd.trim();
     if cmd.is_empty() {
         return;
@@ -247,21 +257,16 @@ fn spawn_command(cmd: &str, wayland_display: Option<&str>) {
 
     let mut command = std::process::Command::new("/bin/sh");
     command.arg("-c").arg(cmd);
-    // Children must connect to slick via WAYLAND_DISPLAY. Remove any inherited
-    // WAYLAND_SOCKET (an fd slick received from its own host): libwayland prefers
-    // it over WAYLAND_DISPLAY, which would make the child target the wrong
-    // compositor and fail with "permission denied". Also drop DISPLAY so GUI
-    // toolkits don't silently fall back to X.
+    // Children must connect to slick. Remove any inherited WAYLAND_SOCKET (an fd
+    // slick received from its own host): libwayland prefers it over
+    // WAYLAND_DISPLAY, which would make the child target the wrong compositor and
+    // fail with "permission denied". Also drop DISPLAY so toolkits don't fall
+    // back to X.
     command.env_remove("WAYLAND_SOCKET");
     command.env_remove("DISPLAY");
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
-    if let Some(display) = wayland_display {
+    if let Some((display, runtime_dir)) = wayland {
         command.env("WAYLAND_DISPLAY", display);
-        // Point the child at the same runtime dir slick created its socket in,
-        // so it cannot end up looking in a different (inaccessible) directory.
-        if !runtime_dir.is_empty() {
-            command.env("XDG_RUNTIME_DIR", &runtime_dir);
-        }
+        command.env("XDG_RUNTIME_DIR", runtime_dir);
         let socket_path = format!("{runtime_dir}/{display}");
         let exists = std::path::Path::new(&socket_path).exists();
         log::info!(
@@ -270,7 +275,7 @@ fn spawn_command(cmd: &str, wayland_display: Option<&str>) {
         );
     } else {
         log::warn!(
-            "launching `{cmd}` but slick's WAYLAND_DISPLAY is not known yet; \
+            "launching `{cmd}` but slick's compositor socket is not ready yet; \
              the child will inherit the host's environment"
         );
     }
