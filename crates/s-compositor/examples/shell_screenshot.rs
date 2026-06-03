@@ -272,6 +272,18 @@ fn main() {
     );
     ui.set_desktop_menu_visible(false);
 
+    // Window title-bar right-click menu.
+    ui.set_window_menu_x(300.0);
+    ui.set_window_menu_y(170.0);
+    ui.set_window_menu_visible(true);
+    save(
+        &ui,
+        &window,
+        PhysicalSize::new(1100, 720),
+        "shot_winmenu.png",
+    );
+    ui.set_window_menu_visible(false);
+
     // Notification center (history + DND + clear).
     ui.set_notif_history(
         Rc::new(slint::VecModel::from(vec![

@@ -1,0 +1,91 @@
+import { Theme } from "theme.slint";
+
+component MenuItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    callback clicked();
+    height: 32px;
+    border-radius: 7px;
+    background: ta.has-hover ? Theme.surface : transparent;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 16px;
+        spacing: 10px;
+        Text {
+            text: root.icon;
+            color: Theme.fg;
+            font-size: 13px;
+            width: 18px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label;
+            color: Theme.fg;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Right-click menu for a window's title bar.
+export component WindowMenu inherits Rectangle {
+    in property <length> menu-x;
+    in property <length> menu-y;
+    in property <bool> maximized;
+    callback minimize();
+    callback toggle-maximize();
+    callback close();
+    callback dismiss();
+
+    TouchArea {
+        clicked => {
+            root.dismiss();
+        }
+    }
+
+    Rectangle {
+        x: min(root.menu-x, root.width - self.width - 6px);
+        y: min(root.menu-y, root.height - self.height - 6px);
+        width: 168px;
+        height: layout.preferred-height;
+        background: Theme.bg;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Theme.hover;
+
+        TouchArea {}
+
+        layout := VerticalLayout {
+            padding: 6px;
+            spacing: 2px;
+            MenuItem {
+                icon: "—";
+                label: "Minimize";
+                clicked => {
+                    root.minimize();
+                }
+            }
+            MenuItem {
+                icon: root.maximized ? "▣" : "□";
+                label: root.maximized ? "Restore" : "Maximize";
+                clicked => {
+                    root.toggle-maximize();
+                }
+            }
+            MenuItem {
+                icon: "✕";
+                label: "Close";
+                clicked => {
+                    root.close();
+                }
+            }
+        }
+    }
+}

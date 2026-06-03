@@ -8,6 +8,7 @@ import { Notifications } from "notifications.slint";
 import { NotificationCenter } from "notification_center.slint";
 import { CalendarPopover } from "calendar.slint";
 import { DesktopMenu } from "desktop_menu.slint";
+import { WindowMenu } from "window_menu.slint";
 import { WindowSwitcher } from "window_switcher.slint";
 import { Osd } from "osd.slint";
 import { Settings } from "settings.slint";
@@ -25,6 +26,7 @@ component WindowFrame inherits Rectangle {
     callback moved(length, length);              // title-bar drag delta
     callback dragging(length, length);           // cursor pos during a drag
     callback dropped(length, length);            // cursor pos when a drag ends
+    callback menu-requested(length, length);     // right-click on the title bar
     callback resized(length, length);            // resize-grip drag delta
     callback focus-requested();                  // raise + focus
     in property <bool> on-active-workspace: true;
@@ -88,6 +90,8 @@ component WindowFrame inherits Rectangle {
                     // snap the window if it was dropped against a screen edge.
                     if e.kind == PointerEventKind.up {
                         root.dropped(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    } else if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                        root.menu-requested(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                     }
                 }
                 double-clicked => {
@@ -309,6 +313,12 @@ export component Desktop inherits Window {
     in-out property <length> desktop-menu-x;
     in-out property <length> desktop-menu-y;
     in property <string> terminal-command;
+    // Window title-bar right-click menu.
+    in-out property <bool> window-menu-visible: false;
+    in-out property <length> window-menu-x;
+    in-out property <length> window-menu-y;
+    in-out property <int> window-menu-id;
+    in-out property <bool> window-menu-maximized;
     in-out property <bool> settings-visible: false;
     in-out property <bool> start-menu-visible: false;
     in-out property <bool> quick-settings-visible: false;
@@ -525,6 +535,13 @@ export component Desktop inherits Window {
         dropped(cx, cy) => {
             root.snap-preview = 0;
             root.drop-window(win.id, cx, cy);
+        }
+        menu-requested(cx, cy) => {
+            root.window-menu-id = win.id;
+            root.window-menu-maximized = win.maximized;
+            root.window-menu-x = cx;
+            root.window-menu-y = cy;
+            root.window-menu-visible = true;
         }
         resized(dw, dh) => {
             root.resize-window(win.id, dw, dh);
@@ -743,6 +760,31 @@ export component Desktop inherits Window {
         }
         dismiss => {
             root.desktop-menu-visible = false;
+        }
+    }
+
+    if root.window-menu-visible: WindowMenu {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        menu-x: root.window-menu-x;
+        menu-y: root.window-menu-y;
+        maximized: root.window-menu-maximized;
+        minimize => {
+            root.window-menu-visible = false;
+            root.minimize-window(root.window-menu-id);
+        }
+        toggle-maximize => {
+            root.window-menu-visible = false;
+            root.toggle-maximize-window(root.window-menu-id);
+        }
+        close => {
+            root.window-menu-visible = false;
+            root.close-window(root.window-menu-id);
+        }
+        dismiss => {
+            root.window-menu-visible = false;
         }
     }
 
