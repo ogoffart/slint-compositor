@@ -3,13 +3,13 @@ UI and [Smithay](https://smithay.github.io/) for the Wayland protocol.
 
 ## Architecture
 
-slick inverts the usual Smithay layering: **Slint owns rendering, output, input
+s-compositor inverts the usual Smithay layering: **Slint owns rendering, output, input
 and the main event loop** (via its own `backend-winit` for nested development and
 `backend-linuxkms` for bare metal), while **Smithay is used purely as the Wayland
 protocol engine** — it manages clients, surfaces, buffers, `xdg-shell`,
 `wlr-layer-shell` and the seat, but does not present anything itself.
 
-Client windows are imported into GL textures (owned by slick, shared with the
+Client windows are imported into GL textures (owned by s-compositor, shared with the
 Skia renderer as borrowed textures) and shown as Slint `Image`s; the panel,
 taskbar and tray are ordinary Slint UI in the same scene. This keeps the whole
 desktop in one Slint scene graph.
@@ -30,11 +30,11 @@ desktop in one Slint scene graph.
 
 | Crate | Role |
 |-------|------|
-| `slick` | Binary: wires the Slint UI + the Wayland thread together. |
-| `slick-wayland` | Smithay protocol engine (no rendering). Unit-testable logic. |
-| `slick-render` | GL buffer-import bridge (shm MVP, then dmabuf). |
-| `slick-shell` | Plain-Rust data models (windows, workspaces, clock). |
-| `slick-tray` | System tray (SNI) host — stub for now. |
+| `s-compositor` | Binary: wires the Slint UI + the Wayland thread together. |
+| `s-compositor-wayland` | Smithay protocol engine (no rendering). Unit-testable logic. |
+| `s-compositor-render` | GL buffer-import bridge (shm MVP, then dmabuf). |
+| `s-compositor-shell` | Plain-Rust data models (windows, workspaces, clock). |
+| `s-compositor-tray` | System tray (SNI) host — stub for now. |
 
 The Slint UI lives in `ui/` (`desktop.slint`, `panel.slint`, `clock.slint`).
 
@@ -48,7 +48,7 @@ Working today (verified nested under Xvfb + llvmpipe):
   are uploaded into **GL textures we own and share with Slint's renderer** via
   `BorrowedOpenGLTextureBuilder` (rendered with the **Skia** OpenGL renderer).
   Frame callbacks are throttled to ~60Hz.
-- **Server-side decorations**: slick forces `zxdg-decoration` ServerSide and
+- **Server-side decorations**: s-compositor forces `zxdg-decoration` ServerSide and
   draws the title bar (title + close button) and border itself.
 - Right-edge panel with a live clock and a **command launcher** (▶).
 
@@ -60,7 +60,7 @@ milestones (M3–M10; see the project plan). Bare metal uses `backend-linuxkms`.
 ```sh
 cargo build
 cargo test          # pure-logic unit tests (no display needed)
-cargo run -p slick  # requires a display (runs nested under your X11/Wayland session)
+cargo run -p s-compositor  # requires a display (runs nested under your X11/Wayland session)
 ```
 
 Once running, it prints the `WAYLAND_DISPLAY` it created; point a client at it:

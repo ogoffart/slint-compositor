@@ -1,9 +1,9 @@
 [package]
-name = "slick-tray"
+name = "s-compositor-shell"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-log.workspace = true
+chrono.workspace = true

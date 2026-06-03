@@ -3953,6 +3953,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "s-compositor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "env_logger",
+ "glow",
+ "log",
+ "s-compositor-render",
+ "s-compositor-shell",
+ "s-compositor-tray",
+ "s-compositor-wayland",
+ "slint",
+ "slint-build",
+]
+
+[[package]]
+name = "s-compositor-render"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "s-compositor-shell"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+]
+
+[[package]]
+name = "s-compositor-tray"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "s-compositor-wayland"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "calloop 0.14.4",
+ "log",
+ "s-compositor-render",
+ "s-compositor-shell",
+ "smithay",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4183,56 +4233,6 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
-
-[[package]]
-name = "slick"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "env_logger",
- "glow",
- "log",
- "slick-render",
- "slick-shell",
- "slick-tray",
- "slick-wayland",
- "slint",
- "slint-build",
-]
-
-[[package]]
-name = "slick-render"
-version = "0.1.0"
-dependencies = [
- "log",
-]
-
-[[package]]
-name = "slick-shell"
-version = "0.1.0"
-dependencies = [
- "chrono",
-]
-
-[[package]]
-name = "slick-tray"
-version = "0.1.0"
-dependencies = [
- "log",
-]
-
-[[package]]
-name = "slick-wayland"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "calloop 0.14.4",
- "log",
- "slick-render",
- "slick-shell",
- "smithay",
-]
 
 [[package]]
 name = "slint"

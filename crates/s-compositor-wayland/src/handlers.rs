@@ -20,8 +20,8 @@ use smithay::wayland::compositor::{
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::shm::{with_buffer_contents, BufferData};
 
-use slick_render::{convert_to_rgba, ShmFormat};
-use slick_shell::WindowId;
+use s_compositor_render::{convert_to_rgba, ShmFormat};
+use s_compositor_shell::WindowId;
 
 use crate::state::WindowEntry;
 use smithay::wayland::selection::data_device::{
@@ -221,7 +221,7 @@ impl XdgDecorationHandler for SlickState {
 
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
         // Honor the client's preference: if it wants client-side decorations,
-        // slick won't draw any.
+        // s-compositor won't draw any.
         self.set_decoration_mode(&toplevel, mode);
     }
 
@@ -232,7 +232,7 @@ impl XdgDecorationHandler for SlickState {
 }
 
 impl SlickState {
-    /// Apply a decoration mode to a toplevel and record whether slick should
+    /// Apply a decoration mode to a toplevel and record whether s-compositor should
     /// draw decorations for it.
     fn set_decoration_mode(&mut self, toplevel: &ToplevelSurface, mode: DecorationMode) {
         toplevel.with_pending_state(|state| {

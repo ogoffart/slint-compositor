@@ -5,7 +5,7 @@
 //! of which windows are included in the render/input set. This module is plain
 //! logic with no Smithay dependency so it can be unit-tested headlessly.
 
-use slick_shell::{WindowId, WorkspaceId};
+use s_compositor_shell::{WindowId, WorkspaceId};
 
 /// The set of virtual desktops and which one is active.
 #[derive(Debug)]
