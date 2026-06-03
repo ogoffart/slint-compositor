@@ -174,6 +174,9 @@ export component Files inherits Window {
     in property <[Place]> places;
     in property <[Crumb]> crumbs;
     in-out property <string> search-text;
+    in property <bool> is-empty;
+    in property <bool> unreadable;
+    in property <string> selection-size;
     // When true, the breadcrumb is replaced by an editable path field.
     property <bool> editing-path;
 
@@ -184,6 +187,7 @@ export component Files inherits Window {
     callback sort-by(int);
     callback toggle-hidden();
     callback search(string);
+    callback type-ahead(string);
     callback navigate-to(string);
     callback row-pressed(int, bool, bool);  // idx, ctrl, shift
     callback move-cursor(int, bool);        // delta, shift (extend)
@@ -461,6 +465,11 @@ export component Files inherits Window {
                     root.go-back();
                     return EventResult.accept;
                 }
+                // Type-ahead: a plain printable key jumps to the next match.
+                if (!e.modifiers.control && !e.modifiers.alt && e.text != "") {
+                    root.type-ahead(e.text);
+                    return EventResult.accept;
+                }
                 return EventResult.reject;
             }
 
@@ -733,6 +742,21 @@ export component Files inherits Window {
                             }
                         }
                     }
+                    // Empty / unreadable folder message.
+                    if root.is-empty: Rectangle {
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                alignment: center;
+                                Text {
+                                    text: root.unreadable ? "Can't read this folder"
+                                        : (root.search-text != "" ? "No matches" : "This folder is empty");
+                                    color: Theme.subtext;
+                                    font-size: 14px;
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Preview pane (list view only).
@@ -785,7 +809,8 @@ export component Files inherits Window {
         // Status bar.
         Text {
             text: (root.items.length == 1 ? "1 item" : root.items.length + " items")
-                + (root.selection-count > 0 ? " · " + root.selection-count + " selected" : "");
+                + (root.selection-count > 0 ? " · " + root.selection-count + " selected" : "")
+                + (root.selection-size != "" ? " (" + root.selection-size + ")" : "");
             color: Theme.subtext;
             font-size: 11px;
         }
