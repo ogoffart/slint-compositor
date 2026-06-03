@@ -641,6 +641,32 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Drop a window: snap it if released against a screen edge (left/right half
+    // or top = maximize), GNOME-style.
+    desktop.on_drop_window({
+        let cmd_tx = cmd_tx.clone();
+        let model = model.clone();
+        let windows = windows.clone();
+        let weak = desktop.as_weak();
+        move |id, cx, cy| {
+            let Some(d) = weak.upgrade() else {
+                return;
+            };
+            let scale = d.window().scale_factor().max(0.01);
+            let size = d.window().size();
+            let sw = size.width as f32 / scale;
+            let edge = 16.0;
+            let id = id as u64;
+            if cy <= edge {
+                set_maximized(&d, &model, &windows, &cmd_tx, id, true);
+            } else if cx <= edge {
+                snap_window(&d, &model, &windows, &cmd_tx, id, Snap::Left);
+            } else if cx >= sw - edge {
+                snap_window(&d, &model, &windows, &cmd_tx, id, Snap::Right);
+            }
+        }
+    });
+
     // Resize a window via the resize grip (asks the client to reconfigure).
     desktop.on_resize_window({
         let cmd_tx = cmd_tx.clone();
@@ -1288,10 +1314,22 @@ fn snap_focused(
     cmd_tx: &s_compositor_wayland::CommandSender<s_compositor_wayland::Command>,
     snap: Snap,
 ) {
+    let focused = windows.borrow().focused;
+    if let Some(id) = focused {
+        snap_window(d, model, windows, cmd_tx, id, snap);
+    }
+}
+
+/// Snap a specific window to a half of the work area.
+fn snap_window(
+    d: &Desktop,
+    model: &Rc<VecModel<WindowTile>>,
+    windows: &Rc<RefCell<Windows>>,
+    cmd_tx: &s_compositor_wayland::CommandSender<s_compositor_wayland::Command>,
+    id: u64,
+    snap: Snap,
+) {
     let mut w = windows.borrow_mut();
-    let Some(id) = w.focused else {
-        return;
-    };
     let Some(&row) = w.rows.get(&id) else {
         return;
     };

@@ -22,6 +22,7 @@ component WindowFrame inherits Rectangle {
     callback minimize();
     callback toggle-maximize();
     callback moved(length, length);              // title-bar drag delta
+    callback dropped(length, length);            // cursor pos when a drag ends
     callback resized(length, length);            // resize-grip drag delta
     callback focus-requested();                  // raise + focus
     in property <bool> on-active-workspace: true;
@@ -77,6 +78,16 @@ component WindowFrame inherits Rectangle {
                 mouse-cursor: move;
                 moved => {
                     root.moved(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+                pointer-event(e) => {
+                    // On release, report the cursor position so the shell can
+                    // snap the window if it was dropped against a screen edge.
+                    if e.kind == PointerEventKind.up {
+                        root.dropped(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    }
+                }
+                double-clicked => {
+                    root.toggle-maximize();
                 }
             }
 
@@ -349,6 +360,7 @@ export component Desktop inherits Window {
     callback toggle-maximize-window(int);
     callback activate-window(int);                       // taskbar / raise + focus
     callback move-window(int, length, length);
+    callback drop-window(int, length, length);   // window dropped at cursor (x,y)
     callback resize-window(int, length, length);
     callback pointer-window(int, float, float, int, int);
     callback scroll-window(int, float, float);
@@ -477,6 +489,9 @@ export component Desktop inherits Window {
         }
         moved(dx, dy) => {
             root.move-window(win.id, dx, dy);
+        }
+        dropped(cx, cy) => {
+            root.drop-window(win.id, cx, cy);
         }
         resized(dw, dh) => {
             root.resize-window(win.id, dw, dh);
