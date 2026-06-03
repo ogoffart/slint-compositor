@@ -107,3 +107,37 @@ mod tests {
         assert_eq!(ws.switch_to(WorkspaceId(99)), WorkspaceId(1));
     }
 }
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+
+    #[test]
+    fn new_clamps_to_at_least_one() {
+        let ws = Workspaces::new(0);
+        assert_eq!(ws.count(), 1);
+        assert_eq!(ws.active(), WorkspaceId(0));
+    }
+
+    #[test]
+    fn remove_window_clears_from_all_workspaces() {
+        let mut ws = Workspaces::new(3);
+        ws.add_window(WindowId(7));
+        ws.switch_to(WorkspaceId(2));
+        ws.add_window(WindowId(7)); // same id on another workspace
+        ws.remove_window(WindowId(7));
+        assert!(ws.active_windows().is_empty());
+        ws.switch_to(WorkspaceId(0));
+        assert!(ws.active_windows().is_empty());
+    }
+
+    #[test]
+    fn move_window_clamps_target() {
+        let mut ws = Workspaces::new(2);
+        ws.add_window(WindowId(1));
+        ws.move_window(WindowId(1), WorkspaceId(99)); // clamped to last
+        assert!(!ws.is_visible(WindowId(1)));
+        ws.switch_to(WorkspaceId(1));
+        assert!(ws.is_visible(WindowId(1)));
+    }
+}

@@ -701,3 +701,53 @@ fn spawn_command(cmd: &str, wayland: Option<(&str, &str)>) {
         Err(err) => log::error!("failed to launch `{cmd}`: {err}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{evdev_button, evdev_keycode};
+
+    #[test]
+    fn keycode_letters() {
+        assert_eq!(evdev_keycode("a"), Some((30, false)));
+        assert_eq!(evdev_keycode("z"), Some((44, false)));
+        // Uppercase requires shift.
+        assert_eq!(evdev_keycode("A"), Some((30, true)));
+        assert_eq!(evdev_keycode("Q"), Some((16, true)));
+    }
+
+    #[test]
+    fn keycode_digits_and_symbols() {
+        assert_eq!(evdev_keycode("1"), Some((2, false)));
+        assert_eq!(evdev_keycode("0"), Some((11, false)));
+        // Shifted symbols share the digit keycodes.
+        assert_eq!(evdev_keycode("!"), Some((2, true)));
+        assert_eq!(evdev_keycode(")"), Some((11, true)));
+        assert_eq!(evdev_keycode("/"), Some((53, false)));
+        assert_eq!(evdev_keycode("?"), Some((53, true)));
+    }
+
+    #[test]
+    fn keycode_named_keys() {
+        assert_eq!(evdev_keycode(" "), Some((57, false))); // Space
+        assert_eq!(evdev_keycode("\u{000a}"), Some((28, false))); // Return
+        assert_eq!(evdev_keycode("\u{0008}"), Some((14, false))); // Backspace
+        assert_eq!(evdev_keycode("\u{0009}"), Some((15, false))); // Tab
+        assert_eq!(evdev_keycode("\u{001b}"), Some((1, false))); // Escape
+        assert_eq!(evdev_keycode("\u{f702}"), Some((105, false))); // Left arrow
+    }
+
+    #[test]
+    fn keycode_unmapped() {
+        assert_eq!(evdev_keycode(""), None);
+        assert_eq!(evdev_keycode("ab"), None); // more than one char
+        assert_eq!(evdev_keycode("€"), None);
+    }
+
+    #[test]
+    fn buttons_map_to_evdev() {
+        assert_eq!(evdev_button(1), 0x110); // left
+        assert_eq!(evdev_button(2), 0x111); // right
+        assert_eq!(evdev_button(3), 0x112); // middle
+        assert_eq!(evdev_button(0), 0x110); // fallback
+    }
+}

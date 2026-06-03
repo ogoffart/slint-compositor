@@ -56,3 +56,24 @@ mod tests {
         assert_eq!(w.label(), "vim");
     }
 }
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+
+    #[test]
+    fn new_window_is_unfocused_with_empty_strings() {
+        let w = WindowInfo::new(WindowId(5), WorkspaceId(2));
+        assert_eq!(w.id, WindowId(5));
+        assert_eq!(w.workspace, WorkspaceId(2));
+        assert!(!w.focused);
+        assert_eq!(w.app_id, "");
+        assert_eq!(w.title, "");
+    }
+
+    #[test]
+    fn ids_are_ordered() {
+        assert!(WindowId(1) < WindowId(2));
+        assert!(WorkspaceId(0) < WorkspaceId(1));
+    }
+}

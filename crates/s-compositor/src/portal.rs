@@ -111,3 +111,28 @@ fn path_to_uri(path: &std::path::Path) -> String {
     }
     uri
 }
+
+#[cfg(test)]
+mod tests {
+    use super::path_to_uri;
+    use std::path::Path;
+
+    #[test]
+    fn simple_path() {
+        assert_eq!(path_to_uri(Path::new("/a/b")), "file:///a/b");
+    }
+
+    #[test]
+    fn spaces_and_specials_are_percent_encoded() {
+        assert_eq!(
+            path_to_uri(Path::new("/home/u/My File.png")),
+            "file:///home/u/My%20File.png"
+        );
+        assert_eq!(path_to_uri(Path::new("/a#b?c")), "file:///a%23b%3Fc");
+    }
+
+    #[test]
+    fn unreserved_chars_kept() {
+        assert_eq!(path_to_uri(Path::new("/a-b_c.d~e")), "file:///a-b_c.d~e");
+    }
+}
