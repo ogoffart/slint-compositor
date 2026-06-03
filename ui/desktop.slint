@@ -3,10 +3,11 @@ import { Panel } from "panel.slint";
 import { Launcher } from "launcher.slint";
 import { StartMenu } from "start_menu.slint";
 import { LockScreen } from "lock_screen.slint";
+import { QuickSettings } from "quick_settings.slint";
 import { Settings } from "settings.slint";
 import { FileDialog } from "file_dialog.slint";
-import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry } from "types.slint";
-export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry }
+import { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork } from "types.slint";
+export { WindowTile, FileItem, PopupTile, LayerTile, MenuEntry, TrayIcon, WifiNetwork }
 export { Theme }
 
 // Server-side decoration + input routing for one client window.
@@ -232,6 +233,20 @@ export component Desktop inherits Window {
     in-out property <bool> launcher-visible: false;
     in-out property <bool> settings-visible: false;
     in-out property <bool> start-menu-visible: false;
+    in-out property <bool> quick-settings-visible: false;
+
+    // System tray + quick settings (volume / Wi-Fi), driven from Rust.
+    in property <[TrayIcon]> tray-icons;
+    in property <float> volume;
+    in property <bool> muted;
+    in property <bool> wifi-enabled;
+    in property <[WifiNetwork]> wifi-networks;
+    callback set-volume(float);
+    callback toggle-mute();
+    callback wifi-toggle();
+    callback wifi-scan();
+    callback wifi-connect(string, string);
+    callback tray-activate(string);
 
     // Start menu + lock screen.
     in property <[MenuEntry]> menu-entries;
@@ -393,6 +408,8 @@ export component Desktop inherits Window {
         active-workspace: root.active-workspace;
         workspace-count: root.workspace-count;
         thickness: root.panel-size;
+        tray-icons: root.tray-icons;
+        muted: root.muted;
         horizontal: root.panel-edge >= 2;
         width: root.panel-edge >= 2 ? parent.width : root.panel-size;
         height: root.panel-edge >= 2 ? root.panel-size : parent.height;
@@ -404,11 +421,17 @@ export component Desktop inherits Window {
         toggle-settings => {
             root.settings-visible = !root.settings-visible;
         }
+        toggle-quick-settings => {
+            root.quick-settings-visible = !root.quick-settings-visible;
+        }
         activate(id) => {
             root.activate-window(id);
         }
         switch-workspace(n) => {
             root.active-workspace = n;
+        }
+        tray-activate(id) => {
+            root.tray-activate(id);
         }
     }
 
@@ -481,6 +504,35 @@ export component Desktop inherits Window {
         }
         dismiss => {
             root.start-menu-visible = false;
+        }
+    }
+
+    if root.quick-settings-visible: QuickSettings {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        volume: root.volume;
+        muted: root.muted;
+        wifi-enabled: root.wifi-enabled;
+        networks: root.wifi-networks;
+        set-volume(v) => {
+            root.set-volume(v);
+        }
+        toggle-mute => {
+            root.toggle-mute();
+        }
+        toggle-wifi => {
+            root.wifi-toggle();
+        }
+        scan => {
+            root.wifi-scan();
+        }
+        connect(ssid, pw) => {
+            root.wifi-connect(ssid, pw);
+        }
+        dismiss => {
+            root.quick-settings-visible = false;
         }
     }
 

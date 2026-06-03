@@ -1,7 +1,53 @@
 import { Theme } from "theme.slint";
 import { Clock } from "clock.slint";
 import { Eyes } from "eyes.slint";
-import { WindowTile } from "types.slint";
+import { WindowTile, TrayIcon } from "types.slint";
+
+// One StatusNotifierItem icon in the tray.
+component TrayButton inherits Rectangle {
+    in property <TrayIcon> item;
+    callback activate();
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: ta.has-hover ? Theme.surface : transparent;
+    Image {
+        source: root.item.icon;
+        width: 20px;
+        height: 20px;
+        image-fit: contain;
+    }
+    ta := TouchArea {
+        clicked => {
+            root.activate();
+        }
+    }
+}
+
+// The system-tray (SNI) icon strip.
+component TrayStrip {
+    in property <[TrayIcon]> items;
+    in property <bool> horizontal;
+    callback activate(string);
+    if root.horizontal: HorizontalLayout {
+        spacing: 2px;
+        for it in root.items: TrayButton {
+            item: it;
+            activate => {
+                root.activate(it.id);
+            }
+        }
+    }
+    if !root.horizontal: VerticalLayout {
+        spacing: 2px;
+        for it in root.items: TrayButton {
+            item: it;
+            activate => {
+                root.activate(it.id);
+            }
+        }
+    }
+}
 
 // A single icon button in the panel.
 component PanelButton inherits Rectangle {
@@ -104,10 +150,14 @@ export component Panel inherits Rectangle {
     in property <int> active-workspace;
     in property <int> workspace-count: 4;
     in property <length> thickness;   // panel size along its short axis
+    in property <[TrayIcon]> tray-icons;
+    in property <bool> muted;
     callback toggle-start-menu();
     callback toggle-settings();
+    callback toggle-quick-settings();
     callback activate(int);
     callback switch-workspace(int);
+    callback tray-activate(string);
 
     background: Theme.panel;
 
@@ -126,8 +176,20 @@ export component Panel inherits Rectangle {
             height: 40px;
             clicked => { root.toggle-settings(); }
         }
+        PanelButton {
+            icon: root.muted ? "🔇" : "🔊";
+            icon-color: Theme.fg;
+            height: 40px;
+            clicked => { root.toggle-quick-settings(); }
+        }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
+        if root.tray-icons.length > 0: Rectangle { height: 1px; background: Theme.surface; }
+        TrayStrip {
+            items: root.tray-icons;
+            horizontal: false;
+            activate(id) => { root.tray-activate(id); }
+        }
         Rectangle { height: 1px; background: Theme.surface; }
         WorkspaceSwitcher {
             active: root.active-workspace;
@@ -165,8 +227,20 @@ export component Panel inherits Rectangle {
             width: 40px;
             clicked => { root.toggle-settings(); }
         }
+        PanelButton {
+            icon: root.muted ? "🔇" : "🔊";
+            icon-color: Theme.fg;
+            width: 40px;
+            clicked => { root.toggle-quick-settings(); }
+        }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
+        if root.tray-icons.length > 0: Rectangle { width: 1px; background: Theme.surface; }
+        TrayStrip {
+            items: root.tray-icons;
+            horizontal: true;
+            activate(id) => { root.tray-activate(id); }
+        }
         Rectangle { width: 1px; background: Theme.surface; }
         WorkspaceSwitcher {
             active: root.active-workspace;

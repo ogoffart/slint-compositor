@@ -194,7 +194,52 @@ fn main() {
     );
     ui.set_start_menu_visible(false);
 
-    // 5. Lock screen.
+    // 5. Quick settings (volume + Wi-Fi) with tray icons in the panel.
+    ui.set_tray_icons(
+        Rc::new(slint::VecModel::from(vec![
+            TrayIcon {
+                id: "a".into(),
+                title: "Volume".into(),
+                icon: solid_icon(0xf9, 0xe2, 0xaf),
+            },
+            TrayIcon {
+                id: "b".into(),
+                title: "Network".into(),
+                icon: solid_icon(0xcb, 0xa6, 0xf7),
+            },
+        ]))
+        .into(),
+    );
+    ui.set_volume(65.0);
+    ui.set_wifi_enabled(true);
+    ui.set_wifi_networks(
+        Rc::new(slint::VecModel::from(vec![
+            WifiNetwork {
+                ssid: "home-wifi".into(),
+                strength: 88,
+                secure: true,
+                active: true,
+            },
+            WifiNetwork {
+                ssid: "cafe-guest".into(),
+                strength: 54,
+                secure: false,
+                active: false,
+            },
+            WifiNetwork {
+                ssid: "neighbour-5G".into(),
+                strength: 31,
+                secure: true,
+                active: false,
+            },
+        ]))
+        .into(),
+    );
+    ui.set_quick_settings_visible(true);
+    save(&ui, &window, PhysicalSize::new(1100, 720), "shot_quick.png");
+    ui.set_quick_settings_visible(false);
+
+    // 6. Lock screen.
     ui.set_lock_has_password(true);
     ui.set_locked(true);
     save(&ui, &window, PhysicalSize::new(1100, 720), "shot_lock.png");

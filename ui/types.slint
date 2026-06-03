@@ -38,6 +38,21 @@ export struct MenuEntry {
     kind: string,
 }
 
+// A StatusNotifierItem (SNI) tray icon.
+export struct TrayIcon {
+    id: string,
+    title: string,
+    icon: image,
+}
+
+// A WiFi access point shown in the quick-settings network list.
+export struct WifiNetwork {
+    ssid: string,
+    strength: int,   // 0..100
+    secure: bool,
+    active: bool,
+}
+
 // A composited client window: its current frame, title, geometry and state.
 export struct WindowTile {
     id: int,

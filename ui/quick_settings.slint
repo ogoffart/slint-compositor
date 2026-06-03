@@ -1,0 +1,172 @@
+import { Theme } from "theme.slint";
+import { Slider, LineEdit, Button } from "std-widgets.slint";
+import { WifiNetwork } from "types.slint";
+
+// A quick-settings flyout with a volume slider and a Wi-Fi network list, shown
+// as a dimming overlay anchored to the top-right. Clicking a secured network
+// reveals an inline password field.
+export component QuickSettings inherits Rectangle {
+    in property <float> volume;            // 0..100
+    in property <bool> muted;
+    in property <bool> wifi-enabled;
+    in property <[WifiNetwork]> networks;
+    in-out property <string> password-ssid;  // ssid awaiting a password ("" = none)
+
+    callback set-volume(float);
+    callback toggle-mute();
+    callback toggle-wifi();
+    callback scan();
+    callback connect(string, string);        // ssid, password
+    callback dismiss();
+
+    background: Theme.overlay;
+    TouchArea {
+        clicked => {
+            root.dismiss();
+        }
+    }
+
+    Rectangle {
+        x: parent.width - self.width - 12px;
+        y: 12px;
+        width: 330px;
+        height: box.preferred-height;
+        background: Theme.bg;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Theme.hover;
+
+        TouchArea {}
+
+        box := VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+
+            Text {
+                text: "Volume";
+                color: Theme.subtext;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    width: 34px;
+                    height: 32px;
+                    border-radius: 8px;
+                    background: mta.has-hover ? Theme.surface : Theme.panel;
+                    Text {
+                        text: root.muted ? "🔇" : "🔊";
+                        font-size: 16px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    mta := TouchArea {
+                        clicked => {
+                            root.toggle-mute();
+                        }
+                    }
+                }
+                Slider {
+                    vertical-stretch: 0;
+                    horizontal-stretch: 1;
+                    minimum: 0;
+                    maximum: 100;
+                    value: root.volume;
+                    changed(v) => {
+                        root.set-volume(v);
+                    }
+                }
+                Text {
+                    text: "\{round(root.volume)}%";
+                    color: Theme.fg;
+                    vertical-alignment: center;
+                    width: 38px;
+                    horizontal-alignment: right;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: "Wi-Fi";
+                    color: Theme.subtext;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Scan";
+                    clicked => {
+                        root.scan();
+                    }
+                }
+                Button {
+                    text: root.wifi-enabled ? "On" : "Off";
+                    clicked => {
+                        root.toggle-wifi();
+                    }
+                }
+            }
+
+            for n in root.networks: Rectangle {
+                height: root.password-ssid == n.ssid ? 66px : 32px;
+                border-radius: 8px;
+                background: nta.has-hover ? Theme.surface : transparent;
+
+                // Row click target sits beneath the inline controls.
+                nta := TouchArea {
+                    clicked => {
+                        if n.secure && !n.active {
+                            root.password-ssid = n.ssid;
+                        } else {
+                            root.connect(n.ssid, "");
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    padding: 4px;
+                    spacing: 4px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: (n.active ? "● " : "") + n.ssid;
+                            color: n.active ? Theme.accent : Theme.fg;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: (n.secure ? "🔒 " : "") + "\{n.strength}%";
+                            color: Theme.subtext;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    if root.password-ssid == n.ssid: HorizontalLayout {
+                        spacing: 6px;
+                        pw := LineEdit {
+                            input-type: password;
+                            placeholder-text: "Password";
+                            horizontal-stretch: 1;
+                            accepted(t) => {
+                                root.connect(n.ssid, t);
+                                root.password-ssid = "";
+                            }
+                        }
+                        Button {
+                            text: "Connect";
+                            clicked => {
+                                root.connect(n.ssid, pw.text);
+                                root.password-ssid = "";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -314,6 +314,17 @@ fn main() -> anyhow::Result<()> {
         let _ = slint::quit_event_loop();
     });
 
+    // Quick settings / system tray. Backends (PipeWire, NetworkManager, SNI
+    // host) are wired in below where available; these handlers are the UI side.
+    desktop.set_volume(50.0);
+    desktop.set_wifi_enabled(true);
+    desktop.on_set_volume(|v| log::info!("set volume {v}"));
+    desktop.on_toggle_mute(|| log::info!("toggle mute"));
+    desktop.on_wifi_toggle(|| log::info!("toggle wifi"));
+    desktop.on_wifi_scan(|| log::info!("wifi scan"));
+    desktop.on_wifi_connect(|ssid, _pw| log::info!("wifi connect {ssid}"));
+    desktop.on_tray_activate(|id| log::info!("tray activate {id}"));
+
     // Lock screen: unlock when the typed password matches (or none is set).
     desktop.on_unlock({
         let weak = desktop.as_weak();
