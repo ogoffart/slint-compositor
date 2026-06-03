@@ -26,9 +26,9 @@ component WindowFrame inherits Rectangle {
     callback focus-requested();                  // raise + focus
     in property <bool> on-active-workspace: true;
 
-    // Stay rendered while the minimize/restore animation plays out, but never
+    // Stay rendered while any open/minimize/close animation plays out, but never
     // when the window lives on another (inactive) virtual desktop.
-    visible: on-active-workspace && (!tile.minimized || root.anim > 0.01);
+    visible: on-active-workspace && root.factor > 0.005;
     // pointer: surface-local x, y, kind (0=move,1=down,2=up), button (0..3)
     callback pointer(float, float, int, int);
     // cursor-moved: pointer position in window coordinates (for the eyes applet)
@@ -37,17 +37,22 @@ component WindowFrame inherits Rectangle {
     // key: text, pressed, ctrl, alt, shift, meta
     callback key(string, bool, bool, bool, bool, bool);
 
-    // Minimize / restore animation: 1.0 = fully shown, 0.0 = minimized away. The
-    // window scales down towards its centre and fades out.
+    // Open / minimize / close are all expressed as a 0..1 factor; the window
+    // scales towards its centre and fades. They compose into `factor`.
     property <float> anim: tile.minimized ? 0.0 : 1.0;
     animate anim { duration: 180ms; easing: ease-in-out; }
+    property <float> appear: tile.appearing ? 0.0 : 1.0;
+    animate appear { duration: 150ms; easing: ease-out; }
+    property <float> closef: tile.closing ? 0.0 : 1.0;
+    animate closef { duration: 160ms; easing: ease-in; }
+    property <float> factor: root.anim * root.appear * root.closef;
     property <length> full-width: tile.width;
     property <length> full-height: tile.decorated ? tile.height + 28px : tile.height;
 
     clip: true;
-    opacity: root.anim;
-    width: root.full-width * root.anim;
-    height: root.full-height * root.anim;
+    opacity: root.factor;
+    width: root.full-width * root.factor;
+    height: root.full-height * root.factor;
     x: tile.x + (root.full-width - root.width) / 2;
     y: tile.y + (root.full-height - root.height) / 2;
     border-radius: tile.decorated ? 8px : 0px;

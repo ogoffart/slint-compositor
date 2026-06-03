@@ -97,6 +97,10 @@ export struct WindowTile {
     focused: bool,
     minimized: bool,
     maximized: bool,
+    // Briefly true right after the window opens (drives the open animation).
+    appearing: bool,
+    // True while the window is fading out before removal (close animation).
+    closing: bool,
     workspace: int,
     x: length,
     y: length,

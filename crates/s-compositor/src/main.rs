@@ -42,6 +42,12 @@ struct Windows {
     pending: HashMap<u64, Frame>,
     /// Windows removed since the last frame, whose textures must be freed.
     closed: Vec<u64>,
+    /// Newly-mapped windows whose `appearing` flag should be cleared next tick
+    /// (so the open animation has one frame to start from the hidden state).
+    appear_new: Vec<u64>,
+    appear_clear: Vec<u64>,
+    /// Windows fading out: id -> when to actually remove them from the model.
+    closing_at: HashMap<u64, std::time::Instant>,
     /// The currently focused window.
     focused: Option<u64>,
     /// Pre-maximize geometry (x, y, w, h) to restore on un-maximize.
@@ -290,7 +296,11 @@ fn main() -> anyhow::Result<()> {
     // Shortcut editing (Settings "Shortcuts" tab). Mutating a model updates the
     // start menu / desktop icons / panel live; each edit re-saves the config.
     desktop.on_shortcut_set({
-        let (menu, desk, pan) = (menu_model.clone(), desktop_model.clone(), panel_model.clone());
+        let (menu, desk, pan) = (
+            menu_model.clone(),
+            desktop_model.clone(),
+            panel_model.clone(),
+        );
         let weak = desktop.as_weak();
         let bg_path = bg_path.clone();
         let lock_password = lock_password.clone();
@@ -316,7 +326,11 @@ fn main() -> anyhow::Result<()> {
         }
     });
     desktop.on_shortcut_add({
-        let (menu, desk, pan) = (menu_model.clone(), desktop_model.clone(), panel_model.clone());
+        let (menu, desk, pan) = (
+            menu_model.clone(),
+            desktop_model.clone(),
+            panel_model.clone(),
+        );
         let weak = desktop.as_weak();
         let bg_path = bg_path.clone();
         let lock_password = lock_password.clone();
@@ -339,7 +353,11 @@ fn main() -> anyhow::Result<()> {
         }
     });
     desktop.on_shortcut_remove({
-        let (menu, desk, pan) = (menu_model.clone(), desktop_model.clone(), panel_model.clone());
+        let (menu, desk, pan) = (
+            menu_model.clone(),
+            desktop_model.clone(),
+            panel_model.clone(),
+        );
         let weak = desktop.as_weak();
         let bg_path = bg_path.clone();
         let lock_password = lock_password.clone();
@@ -888,6 +906,11 @@ fn main() -> anyhow::Result<()> {
                     active_ws,
                 );
             }
+            // Drive window open/close animations (clear `appearing`, remove
+            // windows whose fade-out has finished).
+            if process_window_anims(&model, &windows) {
+                dirty = true;
+            }
             // Serve pending portal file-open requests with the same dialog.
             while let Ok(request) = portal_rx.try_recv() {
                 let reply = request.reply;
@@ -964,6 +987,8 @@ fn handle_event(
                     focused: false,
                     minimized: false,
                     maximized: false,
+                    appearing: true,
+                    closing: false,
                     workspace: active_workspace,
                     x: offset,
                     y: offset,
@@ -971,6 +996,7 @@ fn handle_event(
                     height: height as f32,
                 });
                 windows.rows.insert(id.0, row);
+                windows.appear_new.push(id.0);
             }
             windows.pending.insert(
                 id.0,
@@ -995,14 +1021,16 @@ fn handle_event(
         Event::WindowRemoved(id) => {
             let mut windows = windows.borrow_mut();
             windows.pending.remove(&id.0);
-            if let Some(removed) = windows.rows.remove(&id.0) {
-                model.remove(removed);
-                for row in windows.rows.values_mut() {
-                    if *row > removed {
-                        *row -= 1;
-                    }
+            // Fade the window out, then remove it from the model after ~200ms
+            // (handled in the event loop). The last frame stays on screen.
+            if let Some(&row) = windows.rows.get(&id.0) {
+                if let Some(mut tile) = model.row_data(row) {
+                    tile.closing = true;
+                    model.set_row_data(row, tile);
                 }
-                windows.closed.push(id.0);
+                windows
+                    .closing_at
+                    .insert(id.0, std::time::Instant::now() + Duration::from_millis(200));
             }
             true
         }
@@ -1481,6 +1509,52 @@ fn u32_to_color(n: u32) -> slint::Color {
         ((n >> 8) & 0xff) as u8,
         (n & 0xff) as u8,
     )
+}
+
+/// Per-tick window-animation bookkeeping: clear the `appearing` flag one frame
+/// after a window maps (so the open animation runs), and remove windows whose
+/// close fade has elapsed. Returns true if the model changed.
+fn process_window_anims(model: &Rc<VecModel<WindowTile>>, windows: &Rc<RefCell<Windows>>) -> bool {
+    let mut dirty = false;
+    let mut w = windows.borrow_mut();
+
+    // Clear `appearing` for windows queued last tick.
+    for id in std::mem::take(&mut w.appear_clear) {
+        if let Some(&row) = w.rows.get(&id) {
+            if let Some(mut tile) = model.row_data(row) {
+                if tile.appearing {
+                    tile.appearing = false;
+                    model.set_row_data(row, tile);
+                    dirty = true;
+                }
+            }
+        }
+    }
+    // Queue this tick's new windows to be cleared next tick.
+    w.appear_clear = std::mem::take(&mut w.appear_new);
+
+    // Remove windows whose fade-out finished.
+    let now = std::time::Instant::now();
+    let due: Vec<u64> = w
+        .closing_at
+        .iter()
+        .filter(|(_, &t)| t <= now)
+        .map(|(&id, _)| id)
+        .collect();
+    for id in due {
+        w.closing_at.remove(&id);
+        if let Some(removed) = w.rows.remove(&id) {
+            model.remove(removed);
+            for row in w.rows.values_mut() {
+                if *row > removed {
+                    *row -= 1;
+                }
+            }
+            w.closed.push(id);
+            dirty = true;
+        }
+    }
+    dirty
 }
 
 /// Maximize or restore a window, clamping a maximized window to the work area so
