@@ -1,4 +1,4 @@
-import { Button, ScrollView } from "std-widgets.slint";
+import { Button, ScrollView, LineEdit } from "std-widgets.slint";
 import { FileItem } from "types.slint";
 
 // A reusable file-open dialog. It is driven entirely from Rust (which fills
@@ -14,8 +14,16 @@ export component FileDialog inherits Rectangle {
     callback go-up();
     callback accept();
     callback cancel();
+    callback navigate-to(string);     // a path typed into the editable bar
+    callback move-selection(int);     // keyboard arrow delta (+1/-1)
+    callback activate-selected();     // Enter: open file or enter directory
 
     background: #000000aa;
+
+    // Focus the keyboard handler as soon as the dialog appears.
+    init => {
+        keys.focus();
+    }
 
     // Click outside the panel to cancel.
     TouchArea {
@@ -52,37 +60,63 @@ export component FileDialog inherits Rectangle {
                         root.go-up();
                     }
                 }
-                Text {
+                // Editable current-directory path: type a folder and press Enter.
+                LineEdit {
                     text: root.path;
-                    color: #a6adc8;
-                    vertical-alignment: center;
-                    overflow: elide;
                     horizontal-stretch: 1;
+                    accepted(text) => {
+                        root.navigate-to(text);
+                    }
                 }
             }
 
-            ScrollView {
-                vertical-stretch: 1;
-                VerticalLayout {
-                    alignment: start;
-                    for item[idx] in root.items: Rectangle {
-                        height: 28px;
-                        background: idx == root.selected ? #585b70
-                            : (entry-area.has-hover ? #313244 : transparent);
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            Text {
-                                text: item.is-dir ? item.name + "/" : item.name;
-                                color: item.is-dir ? #89b4fa : #cdd6f4;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                                overflow: elide;
-                                horizontal-stretch: 1;
+            keys := FocusScope {
+                key-pressed(e) => {
+                    if (e.text == Key.UpArrow) {
+                        root.move-selection(-1);
+                        return EventResult.accept;
+                    }
+                    if (e.text == Key.DownArrow) {
+                        root.move-selection(1);
+                        return EventResult.accept;
+                    }
+                    if (e.text == Key.Return) {
+                        root.activate-selected();
+                        return EventResult.accept;
+                    }
+                    if (e.text == Key.Backspace) {
+                        root.go-up();
+                        return EventResult.accept;
+                    }
+                    if (e.text == Key.Escape) {
+                        root.cancel();
+                        return EventResult.accept;
+                    }
+                    return EventResult.reject;
+                }
+
+                ScrollView {
+                    VerticalLayout {
+                        alignment: start;
+                        for item[idx] in root.items: Rectangle {
+                            height: 28px;
+                            background: idx == root.selected ? #585b70
+                                : (entry-area.has-hover ? #313244 : transparent);
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: item.is-dir ? item.name + "/" : item.name;
+                                    color: item.is-dir ? #89b4fa : #cdd6f4;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
                             }
-                        }
-                        entry-area := TouchArea {
-                            clicked => {
-                                root.entry-clicked(idx);
+                            entry-area := TouchArea {
+                                clicked => {
+                                    root.entry-clicked(idx);
+                                }
                             }
                         }
                     }

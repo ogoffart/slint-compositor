@@ -73,6 +73,64 @@ impl Controller {
         }
     }
 
+    /// Navigate to a path typed into the editable path bar: a directory is
+    /// entered, a file enters its parent and is selected.
+    pub fn navigate_to(&mut self, path: &str) {
+        let path = PathBuf::from(expand_tilde(path));
+        if path.is_dir() {
+            self.navigate(path);
+        } else if path.is_file() {
+            if let Some(parent) = path.parent().map(Path::to_path_buf) {
+                self.navigate(parent);
+                self.select_path(&path);
+            }
+        }
+    }
+
+    /// Move the keyboard selection by `delta` rows (clamped to the list).
+    pub fn move_selection(&mut self, delta: i32) {
+        let Some(d) = self.weak.upgrade() else {
+            return;
+        };
+        let count = self.entries.len() as i32;
+        if count == 0 {
+            return;
+        }
+        let current = d.get_file_dialog_selected();
+        let next = if current < 0 {
+            if delta < 0 {
+                count - 1
+            } else {
+                0
+            }
+        } else {
+            (current + delta).clamp(0, count - 1)
+        };
+        d.set_file_dialog_selected(next);
+    }
+
+    /// Enter the selected directory, or accept the selected file (Enter key).
+    pub fn activate_selected(&mut self) {
+        let sel = self
+            .weak
+            .upgrade()
+            .map(|d| d.get_file_dialog_selected())
+            .unwrap_or(-1);
+        match self.entries.get(sel.max(0) as usize).cloned() {
+            Some(path) if sel >= 0 && path.is_dir() => self.navigate(path),
+            Some(_) if sel >= 0 => self.accept(),
+            _ => {}
+        }
+    }
+
+    fn select_path(&mut self, path: &Path) {
+        if let Some(idx) = self.entries.iter().position(|p| p == path) {
+            if let Some(d) = self.weak.upgrade() {
+                d.set_file_dialog_selected(idx as i32);
+            }
+        }
+    }
+
     pub fn accept(&mut self) {
         let sel = self
             .weak
@@ -162,6 +220,14 @@ fn is_image(path: &Path) -> bool {
         ext.as_deref(),
         Some("png" | "jpg" | "jpeg" | "bmp" | "gif" | "webp" | "svg")
     )
+}
+
+/// Expand a leading `~` to the home directory.
+fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix('~') {
+        return format!("{}{}", home_dir().display(), rest);
+    }
+    path.to_string()
 }
 
 /// The user's home directory, or `/`.

@@ -219,6 +219,9 @@ export component Desktop inherits Window {
     callback fd-go-up();
     callback fd-accept();
     callback fd-cancel();
+    callback fd-navigate-to(string);
+    callback fd-move-selection(int);
+    callback fd-activate-selected();
 
     preferred-width: 1280px;
     preferred-height: 800px;
@@ -335,6 +338,15 @@ export component Desktop inherits Window {
         }
         cancel => {
             root.fd-cancel();
+        }
+        navigate-to(p) => {
+            root.fd-navigate-to(p);
+        }
+        move-selection(d) => {
+            root.fd-move-selection(d);
+        }
+        activate-selected => {
+            root.fd-activate-selected();
         }
     }
 }
