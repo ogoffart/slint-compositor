@@ -49,6 +49,17 @@ fn on_path(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// If `bin` sits next to our own executable (the usual case when running from a
+/// build tree or an install prefix), return its absolute path so it can be
+/// launched without being on `$PATH`.
+fn bundled(bin: &str) -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let candidate = exe.parent()?.join(bin);
+    candidate
+        .is_file()
+        .then(|| candidate.to_string_lossy().into_owned())
+}
+
 /// Auto-discover sensible default start-menu apps: a browser, a terminal, a file
 /// manager and a few games, picking whatever is installed.
 pub fn discover_default_apps() -> Vec<AppEntry> {
@@ -74,28 +85,41 @@ pub fn discover_default_apps() -> Vec<AppEntry> {
             ("epiphany", "Web"),
         ],
     );
+    // Terminal: Alacritty is the shell's bundled default, falling back to
+    // whatever else is installed.
     pick(
         &mut apps,
         "🖥",
         &[
-            ("foot", "Terminal"),
             ("alacritty", "Terminal"),
+            ("foot", "Terminal"),
             ("kitty", "Terminal"),
             ("wezterm", "Terminal"),
             ("gnome-terminal", "Terminal"),
             ("xterm", "Terminal"),
         ],
     );
-    pick(
-        &mut apps,
-        "📁",
-        &[
-            ("nautilus", "Files"),
-            ("thunar", "Files"),
-            ("pcmanfm", "Files"),
-            ("dolphin", "Files"),
-        ],
-    );
+    // File manager: prefer our own `s-files` browser (found next to the
+    // compositor binary, so it works straight from the build tree), falling back
+    // to a system file manager.
+    if let Some(command) = bundled("s-files").or_else(|| on_path("s-files").then(|| "s-files".to_string())) {
+        apps.push(AppEntry {
+            icon: "📁".to_string(),
+            name: "Files".to_string(),
+            command,
+        });
+    } else {
+        pick(
+            &mut apps,
+            "📁",
+            &[
+                ("nautilus", "Files"),
+                ("thunar", "Files"),
+                ("pcmanfm", "Files"),
+                ("dolphin", "Files"),
+            ],
+        );
+    }
 
     // Up to three games.
     let games = [

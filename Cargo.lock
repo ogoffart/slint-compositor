@@ -4046,6 +4046,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "s-files"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "log",
+ "slint",
+ "slint-build",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
