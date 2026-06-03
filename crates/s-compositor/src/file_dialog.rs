@@ -57,14 +57,12 @@ impl Controller {
     }
 
     pub fn entry_clicked(&mut self, idx: i32) {
-        let Some(path) = self.entries.get(idx as usize).cloned() else {
+        if idx < 0 || idx as usize >= self.entries.len() {
             return;
-        };
-        if path.is_dir() {
-            self.navigate(path);
-        } else if let Some(d) = self.weak.upgrade() {
-            d.set_file_dialog_selected(idx);
         }
+        // A single click selects (and previews); a directory is entered on
+        // double-click, Enter or →, keeping mouse and keyboard consistent.
+        self.update_selection(idx);
     }
 
     pub fn go_up(&mut self) {
@@ -87,7 +85,8 @@ impl Controller {
         }
     }
 
-    /// Move the keyboard selection by `delta` rows (clamped to the list).
+    /// Move the keyboard selection by `delta` rows (clamped to the list). Large
+    /// magnitudes act as Home/End.
     pub fn move_selection(&mut self, delta: i32) {
         let Some(d) = self.weak.upgrade() else {
             return;
@@ -106,7 +105,34 @@ impl Controller {
         } else {
             (current + delta).clamp(0, count - 1)
         };
-        d.set_file_dialog_selected(next);
+        self.update_selection(next);
+    }
+
+    /// Set the current selection and refresh the preview pane: the selected
+    /// name, plus a loaded image when the selection is an image file.
+    fn update_selection(&mut self, idx: i32) {
+        let Some(d) = self.weak.upgrade() else {
+            return;
+        };
+        d.set_file_dialog_selected(idx);
+        let path = if idx >= 0 {
+            self.entries.get(idx as usize).cloned()
+        } else {
+            None
+        };
+        let name = path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        d.set_file_dialog_selected_name(name.into());
+
+        let image = path
+            .as_ref()
+            .filter(|p| p.is_file() && is_image(p))
+            .and_then(|p| slint::Image::load_from_path(p).ok())
+            .unwrap_or_default();
+        d.set_file_dialog_preview(image);
     }
 
     /// Enter the selected directory, or accept the selected file (Enter key).
@@ -125,9 +151,7 @@ impl Controller {
 
     fn select_path(&mut self, path: &Path) {
         if let Some(idx) = self.entries.iter().position(|p| p == path) {
-            if let Some(d) = self.weak.upgrade() {
-                d.set_file_dialog_selected(idx as i32);
-            }
+            self.update_selection(idx as i32);
         }
     }
 
@@ -144,6 +168,11 @@ impl Controller {
         }) else {
             return; // nothing selected
         };
+        // "Open" on a directory enters it rather than returning it as a result.
+        if path.is_dir() {
+            self.navigate(path);
+            return;
+        }
         self.close();
         if let Some(cb) = self.on_result.take() {
             cb(Some(path));
@@ -193,23 +222,63 @@ impl Controller {
         let mut rows = Vec::with_capacity(dirs.len() + files.len());
         for (name, path) in dirs.into_iter().chain(files) {
             let is_dir = path.is_dir();
+            let kind = file_kind(&path, is_dir);
             self.entries.push(path);
             rows.push(FileItem {
                 name: name.into(),
                 is_dir,
+                kind: kind.into(),
             });
         }
+        let has_entries = !rows.is_empty();
         self.items.set_vec(rows);
 
         if let Some(d) = self.weak.upgrade() {
             d.set_file_dialog_path(self.cwd.to_string_lossy().as_ref().into());
-            d.set_file_dialog_selected(-1);
         }
+        // Pre-select the first entry so keyboard navigation and the preview work
+        // immediately on entering a directory.
+        self.update_selection(if has_entries { 0 } else { -1 });
     }
 }
 
 /// A shared, reference-counted controller.
 pub type SharedController = Rc<RefCell<Controller>>;
+
+/// Classify a path into a coarse kind used by the UI to pick an icon.
+fn file_kind(path: &Path, is_dir: bool) -> &'static str {
+    if is_dir {
+        return "dir";
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("png" | "jpg" | "jpeg" | "bmp" | "gif" | "webp" | "svg" | "ico" | "tiff") => "image",
+        Some("mp3" | "flac" | "wav" | "ogg" | "opus" | "m4a" | "aac") => "audio",
+        Some("mp4" | "mkv" | "webm" | "mov" | "avi" | "m4v" | "wmv") => "video",
+        Some("zip" | "tar" | "gz" | "bz2" | "xz" | "zst" | "7z" | "rar") => "archive",
+        Some("rs" | "c" | "h" | "cpp" | "py" | "js" | "ts" | "go" | "java" | "sh" | "toml"
+        | "json" | "yaml" | "yml" | "slint" | "html" | "css") => "code",
+        Some("txt" | "md" | "log" | "rst" | "ini" | "conf") => "text",
+        Some("pdf") => "pdf",
+        Some("appimage" | "bin" | "run" | "exe") => "exec",
+        _ => {
+            // Treat any executable-bit file as a program.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = std::fs::metadata(path) {
+                    if meta.permissions().mode() & 0o111 != 0 {
+                        return "exec";
+                    }
+                }
+            }
+            "file"
+        }
+    }
+}
 
 fn is_image(path: &Path) -> bool {
     let ext = path
@@ -239,8 +308,24 @@ pub fn home_dir() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::is_image;
+    use super::{file_kind, is_image};
     use std::path::Path;
+
+    #[test]
+    fn classifies_file_kinds() {
+        assert_eq!(file_kind(Path::new("/x"), true), "dir");
+        assert_eq!(file_kind(Path::new("a.png"), false), "image");
+        assert_eq!(file_kind(Path::new("a.JPEG"), false), "image");
+        assert_eq!(file_kind(Path::new("a.mp3"), false), "audio");
+        assert_eq!(file_kind(Path::new("a.mkv"), false), "video");
+        assert_eq!(file_kind(Path::new("a.tar"), false), "archive");
+        assert_eq!(file_kind(Path::new("main.rs"), false), "code");
+        assert_eq!(file_kind(Path::new("a.toml"), false), "code");
+        assert_eq!(file_kind(Path::new("notes.txt"), false), "text");
+        assert_eq!(file_kind(Path::new("a.pdf"), false), "pdf");
+        assert_eq!(file_kind(Path::new("a.exe"), false), "exec");
+        assert_eq!(file_kind(Path::new("/nonexistent/unknown.xyz"), false), "file");
+    }
 
     #[test]
     fn recognizes_image_extensions() {

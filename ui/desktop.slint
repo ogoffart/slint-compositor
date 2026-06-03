@@ -247,6 +247,8 @@ export component Desktop inherits Window {
     in property <string> file-dialog-path;
     in property <[FileItem]> file-dialog-items;
     in-out property <int> file-dialog-selected: -1;
+    in property <image> file-dialog-preview;
+    in property <string> file-dialog-selected-name;
 
     callback launch(string);
     callback close-window(int);
@@ -524,6 +526,8 @@ export component Desktop inherits Window {
         path: root.file-dialog-path;
         items: root.file-dialog-items;
         selected <=> root.file-dialog-selected;
+        preview: root.file-dialog-preview;
+        selected-name: root.file-dialog-selected-name;
         entry-clicked(i) => {
             root.fd-entry-clicked(i);
         }
