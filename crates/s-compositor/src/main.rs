@@ -17,6 +17,7 @@ mod config;
 mod file_dialog;
 mod gl_bridge;
 mod icons;
+mod network;
 mod portal;
 use gl_bridge::{Frame, GlBridge};
 
@@ -314,15 +315,45 @@ fn main() -> anyhow::Result<()> {
         let _ = slint::quit_event_loop();
     });
 
-    // Quick settings / system tray. Volume + Wi-Fi backends are wired in below
-    // where available; these handlers are the UI side.
+    // Quick settings: volume (stub until the PipeWire backend lands) ...
     desktop.set_volume(50.0);
-    desktop.set_wifi_enabled(true);
     desktop.on_set_volume(|v| log::info!("set volume {v}"));
     desktop.on_toggle_mute(|| log::info!("toggle mute"));
-    desktop.on_wifi_toggle(|| log::info!("toggle wifi"));
-    desktop.on_wifi_scan(|| log::info!("wifi scan"));
-    desktop.on_wifi_connect(|ssid, _pw| log::info!("wifi connect {ssid}"));
+
+    // ... and Wi-Fi via NetworkManager.
+    let wifi_model = Rc::new(VecModel::<WifiNetwork>::default());
+    desktop.set_wifi_networks(ModelRc::from(wifi_model.clone()));
+    let (net_rx, net_cmd_tx) = match network::spawn() {
+        Some((rx, tx)) => (Some(rx), Some(tx)),
+        None => (None, None),
+    };
+    desktop.on_wifi_scan({
+        let tx = net_cmd_tx.clone();
+        move || {
+            if let Some(tx) = &tx {
+                let _ = tx.try_send(network::NetCommand::Scan);
+            }
+        }
+    });
+    desktop.on_wifi_toggle({
+        let tx = net_cmd_tx.clone();
+        move || {
+            if let Some(tx) = &tx {
+                let _ = tx.try_send(network::NetCommand::Toggle);
+            }
+        }
+    });
+    desktop.on_wifi_connect({
+        let tx = net_cmd_tx.clone();
+        move |ssid, password| {
+            if let Some(tx) = &tx {
+                let _ = tx.try_send(network::NetCommand::Connect {
+                    ssid: ssid.to_string(),
+                    password: password.to_string(),
+                });
+            }
+        }
+    });
 
     // System tray (SNI host on its own thread).
     let tray_model = Rc::new(VecModel::<TrayIcon>::default());
@@ -519,6 +550,7 @@ fn main() -> anyhow::Result<()> {
         let icon_cache = icon_cache.clone();
         let tray_model = tray_model.clone();
         let tray_ids = tray_ids.clone();
+        let wifi_model = wifi_model.clone();
         move || {
             let mut dirty = false;
 
@@ -527,6 +559,16 @@ fn main() -> anyhow::Result<()> {
                 while let Ok(update) = rx.try_recv() {
                     apply_tray_update(update, &tray_model, &tray_ids);
                     dirty = true;
+                }
+            }
+
+            // Drain NetworkManager updates.
+            if let Some(rx) = &net_rx {
+                while let Ok(event) = rx.try_recv() {
+                    if let Some(d) = weak.upgrade() {
+                        apply_net_event(event, &d, &wifi_model);
+                        dirty = true;
+                    }
                 }
             }
             let active_ws = weak
@@ -1010,6 +1052,25 @@ fn apply_tray_update(
                 ids.borrow_mut().remove(idx);
                 model.remove(idx);
             }
+        }
+    }
+}
+
+/// Apply a NetworkManager update to the UI.
+fn apply_net_event(event: network::NetEvent, d: &Desktop, model: &Rc<VecModel<WifiNetwork>>) {
+    match event {
+        network::NetEvent::Enabled(on) => d.set_wifi_enabled(on),
+        network::NetEvent::Networks(nets) => {
+            let rows: Vec<WifiNetwork> = nets
+                .into_iter()
+                .map(|n| WifiNetwork {
+                    ssid: n.ssid.into(),
+                    strength: n.strength as i32,
+                    secure: n.secure,
+                    active: n.active,
+                })
+                .collect();
+            model.set_vec(rows);
         }
     }
 }
