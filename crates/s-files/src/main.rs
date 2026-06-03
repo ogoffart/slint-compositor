@@ -72,6 +72,8 @@ fn main() -> Result<(), slint::PlatformError> {
     on!(on_paste, paste);
     on!(on_trash, trash);
     on!(on_toggle_hidden, toggle_hidden);
+    on!(on_show_properties, show_properties);
+    on!(on_drop_on_row, drop_on_row, |idx|);
     on!(on_activate, activate, |idx|);
     on!(on_row_pressed, row_pressed, |idx, ctrl, shift|);
     on!(on_move_cursor, move_cursor, |delta, shift|);
@@ -91,6 +93,10 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let b = browser.clone();
         window.on_go_to(move |path| b.borrow_mut().go_to(path.as_str()));
+    }
+    {
+        let b = browser.clone();
+        window.on_drop_on_place(move |path| b.borrow_mut().drop_on_place(path.as_str()));
     }
     {
         let b = browser.clone();
@@ -185,6 +191,9 @@ mod screenshot {
         }
         if let Ok(f) = std::env::var("SFILES_SHOT_FILTER") {
             browser.borrow_mut().set_filter(&f);
+        }
+        if std::env::var("SFILES_SHOT_PROPS").is_ok() {
+            browser.borrow().show_properties();
         }
         // Optionally Shift-select rows 0..=N to show multi-selection.
         if let Some(n) = std::env::var("SFILES_SHOT_RANGE")

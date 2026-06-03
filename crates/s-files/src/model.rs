@@ -362,6 +362,109 @@ impl Browser {
         self.list(cwd);
     }
 
+    // --- Drag & drop -------------------------------------------------------
+
+    /// Drop the current selection onto the directory at row `idx`.
+    pub fn drop_on_row(&mut self, idx: i32) {
+        if let Some(path) = self.entries.get(idx.max(0) as usize).cloned() {
+            self.drop_into(path);
+        }
+    }
+
+    /// Drop the current selection onto a Places-sidebar directory.
+    pub fn drop_on_place(&mut self, path: &str) {
+        self.drop_into(PathBuf::from(path));
+    }
+
+    /// Move the selected paths into `dir`, skipping no-op and invalid moves.
+    fn drop_into(&mut self, dir: PathBuf) {
+        if !dir.is_dir() {
+            return;
+        }
+        let mut moved = false;
+        for src in self.targets() {
+            // Don't move a folder into itself or its own subtree, and don't move
+            // something into the directory it already lives in.
+            if dir == src || dir.starts_with(&src) || src.parent() == Some(dir.as_path()) {
+                continue;
+            }
+            match ops::move_into(&src, &dir) {
+                Ok(_) => moved = true,
+                Err(err) => log::warn!("move {} into {} failed: {err}", src.display(), dir.display()),
+            }
+        }
+        if moved {
+            let cwd = self.cwd.clone();
+            self.list(cwd);
+        }
+    }
+
+    // --- Properties --------------------------------------------------------
+
+    /// Populate and show the Properties dialog for the current selection.
+    pub fn show_properties(&self) {
+        let Some(w) = self.weak.upgrade() else {
+            return;
+        };
+        let count = self.marks.iter().filter(|m| **m).count();
+        if count > 1 {
+            let total: u64 = self
+                .marks
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| **m)
+                .map(|(i, _)| self.sizes.get(i).copied().unwrap_or(0))
+                .sum();
+            w.set_prop_name(format!("{count} items").into());
+            w.set_prop_where(self.cwd.to_string_lossy().as_ref().into());
+            w.set_prop_type("Multiple".into());
+            w.set_prop_size(human_size(total).into());
+            w.set_prop_modified(Default::default());
+            w.set_prop_perms(Default::default());
+            w.set_prop_kind("".into());
+            w.set_prop_is_dir(false);
+        } else if let Some(path) = self.entries.get(self.cursor.max(0) as usize).cloned() {
+            let is_dir = path.is_dir();
+            let kind = file_kind(&path, is_dir);
+            let meta = std::fs::metadata(&path).ok();
+            w.set_prop_name(
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+                    .into(),
+            );
+            w.set_prop_where(
+                path.parent()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+                    .into(),
+            );
+            w.set_prop_type(if is_dir { "Folder".into() } else { kind.into() });
+            w.set_prop_size(
+                if is_dir {
+                    "—".to_string()
+                } else {
+                    let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                    format!("{} ({} bytes)", human_size(len), len)
+                }
+                .into(),
+            );
+            w.set_prop_modified(
+                meta.as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .map(format_time_full)
+                    .unwrap_or_default()
+                    .into(),
+            );
+            w.set_prop_perms(meta.as_ref().map(perm_string).unwrap_or_default().into());
+            w.set_prop_kind(kind.into());
+            w.set_prop_is_dir(is_dir);
+        } else {
+            return;
+        }
+        w.set_prop_visible(true);
+    }
+
     pub fn rename(&mut self, new_name: &str) {
         let Some(path) = self.entries.get(self.cursor.max(0) as usize).cloned() else {
             return;
@@ -700,6 +803,36 @@ fn format_time(time: std::time::SystemTime) -> String {
         .to_string()
 }
 
+/// Like [`format_time`] but with seconds, for the Properties dialog.
+fn format_time_full(time: std::time::SystemTime) -> String {
+    chrono::DateTime::<chrono::Local>::from(time)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
+}
+
+/// Render a metadata's Unix permission bits as "rwxr-xr-x" (empty off-Unix).
+fn perm_string(meta: &std::fs::Metadata) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode();
+        let rwx = |bits: u32| {
+            format!(
+                "{}{}{}",
+                if bits & 0o4 != 0 { 'r' } else { '-' },
+                if bits & 0o2 != 0 { 'w' } else { '-' },
+                if bits & 0o1 != 0 { 'x' } else { '-' },
+            )
+        };
+        return format!("{}{}{}", rwx((mode >> 6) & 7), rwx((mode >> 3) & 7), rwx(mode & 7));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        String::new()
+    }
+}
+
 fn human_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut size = bytes as f64;
@@ -1015,6 +1148,49 @@ mod tests {
                 .to_string_lossy(),
             "b.txt"
         );
+    }
+
+    #[test]
+    fn drag_drop_moves_into_folder() {
+        let dir = scratch();
+        std::fs::create_dir(dir.join("box")).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut b = headless();
+        b.navigate(dir.clone());
+        // Select a.txt, then drop it onto the "box" folder row.
+        let a_idx = names(&b).iter().position(|n| n == "a.txt").unwrap() as i32;
+        let box_idx = names(&b).iter().position(|n| n == "box").unwrap() as i32;
+        b.row_pressed(a_idx, false, false);
+        b.drop_on_row(box_idx);
+        assert!(dir.join("box/a.txt").exists());
+        assert!(!dir.join("a.txt").exists());
+    }
+
+    #[test]
+    fn drag_drop_ignores_noops() {
+        let dir = scratch();
+        std::fs::create_dir(dir.join("box")).unwrap();
+        let mut b = headless();
+        b.navigate(dir.clone());
+        // Selecting "box" and dropping onto itself must do nothing.
+        let box_idx = names(&b).iter().position(|n| n == "box").unwrap() as i32;
+        b.row_pressed(box_idx, false, false);
+        b.drop_on_row(box_idx);
+        assert!(dir.join("box").is_dir());
+    }
+
+    #[test]
+    fn permission_string() {
+        let dir = scratch();
+        let f = dir.join("p");
+        std::fs::write(&f, "x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o754)).unwrap();
+            let meta = std::fs::metadata(&f).unwrap();
+            assert_eq!(perm_string(&meta), "rwxr-xr--");
+        }
     }
 
     #[test]

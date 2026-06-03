@@ -77,6 +77,26 @@ component PlaceRow inherits Rectangle {
     }
 }
 
+// One label/value row in the Properties dialog.
+component PropRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 10px;
+    Text {
+        text: root.label;
+        color: Theme.subtext;
+        font-size: 13px;
+        width: 110px;
+    }
+    Text {
+        text: root.value;
+        color: Theme.fg;
+        font-size: 13px;
+        horizontal-stretch: 1;
+        overflow: elide;
+    }
+}
+
 // A clickable breadcrumb path segment.
 component BreadcrumbBtn inherits Rectangle {
     in property <string> label;
@@ -128,15 +148,35 @@ component RowHit inherits TouchArea {
     callback press(int, bool, bool);
     callback context(int, length, length, bool);
     callback open(int);
+    callback drag-move(length, length);   // dragged past threshold (window coords)
+    callback drag-drop();                  // released after a drag
+    property <bool> moved-far;
     pointer-event(e) => {
         if (e.kind == PointerEventKind.down) {
             if (e.button == PointerEventButton.left) {
+                root.moved-far = false;
                 root.press(root.index, e.modifiers.control, e.modifiers.shift);
             } else if (e.button == PointerEventButton.right) {
                 root.context(root.index,
                     self.absolute-position.x + self.mouse-x,
                     self.absolute-position.y + self.mouse-y,
                     root.is-selected);
+            }
+        } else if (e.kind == PointerEventKind.up) {
+            if (e.button == PointerEventButton.left && root.moved-far) {
+                root.drag-drop();
+            }
+            root.moved-far = false;
+        }
+    }
+    moved => {
+        if (self.pressed) {
+            if (abs(self.mouse-x - self.pressed-x) > 6px || abs(self.mouse-y - self.pressed-y) > 6px) {
+                root.moved-far = true;
+            }
+            if (root.moved-far) {
+                root.drag-move(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
             }
         }
     }
@@ -180,6 +220,24 @@ export component Files inherits Window {
     // When true, the breadcrumb is replaced by an editable path field.
     property <bool> editing-path;
 
+    // Properties dialog (populated from Rust).
+    in-out property <bool> prop-visible;
+    in property <string> prop-name;
+    in property <string> prop-where;
+    in property <string> prop-type;
+    in property <string> prop-size;
+    in property <string> prop-modified;
+    in property <string> prop-perms;
+    in property <string> prop-kind;
+    in property <bool> prop-is-dir;
+
+    // Internal drag-and-drop state.
+    property <bool> dragging;
+    property <length> drag-x;
+    property <length> drag-y;
+    property <int> drag-count;
+    property <int> drop-row: -1;     // folder row under the cursor (-1 = none)
+
     callback go-back();
     callback go-up();
     callback go-home();
@@ -188,6 +246,9 @@ export component Files inherits Window {
     callback toggle-hidden();
     callback search(string);
     callback type-ahead(string);
+    callback show-properties();
+    callback drop-on-row(int);
+    callback drop-on-place(string);
     callback navigate-to(string);
     callback row-pressed(int, bool, bool);  // idx, ctrl, shift
     callback move-cursor(int, bool);        // delta, shift (extend)
@@ -235,6 +296,33 @@ export component Files inherits Window {
         root.prompt-title = "New Folder";
         root.prompt-initial = "untitled folder";
         root.prompt-visible = true;
+    }
+    // Hit-test the cursor against the file view to find the folder row it is
+    // over. Run from an event handler (post-layout), so reading geometry here is
+    // safe — unlike a reactive binding, which would loop against absolute-position.
+    function update-drop-target() {
+        if (root.drag-x >= scroll.absolute-position.x
+            && root.drag-x < scroll.absolute-position.x + scroll.visible-width
+            && root.drag-y >= scroll.absolute-position.y
+            && root.drag-y < scroll.absolute-position.y + scroll.visible-height) {
+            if (root.view == 0) {
+                root.drop-row = floor((root.drag-y - scroll.absolute-position.y - scroll.viewport-y) / root.tile-h) * root.columns
+                    + floor((root.drag-x - scroll.absolute-position.x - root.grid-pad) / root.tile-w);
+            } else {
+                root.drop-row = floor((root.drag-y - scroll.absolute-position.y - scroll.viewport-y) / root.row-h);
+            }
+        } else {
+            root.drop-row = -1;
+        }
+    }
+
+    // End a drag: drop the selection onto the folder/place under the cursor.
+    function finish-drag() {
+        root.dragging = false;
+        if (root.drop-row >= 0) {
+            root.drop-on-row(root.drop-row);
+        }
+        root.drop-row = -1;
     }
 
     // Keep the cursor entry scrolled into view (works across all three views).
@@ -402,6 +490,10 @@ export component Files inherits Window {
                     search.focus();
                     return EventResult.accept;
                 }
+                if (e.modifiers.control && (e.text == "i" || e.text == "I")) {
+                    root.show-properties();
+                    return EventResult.accept;
+                }
                 if (e.text == Key.Escape) {
                     root.search-text = "";
                     root.search("");
@@ -561,14 +653,22 @@ export component Files inherits Window {
                                     y: floor(idx / root.columns) * root.tile-h;
                                     width: root.tile-w;
                                     height: root.tile-h;
-                                    Rectangle {
+                                    tile := Rectangle {
+                                        property <bool> drop-hit: root.dragging && item.is-dir && root.drop-row == idx;
                                         width: parent.width - 8px;
                                         height: parent.height - 8px;
-                                        background: item.selected ? Theme.accent
-                                            : (ihit.has-hover ? Theme.hover : transparent);
+                                        background: self.drop-hit ? Theme.accent.brighter(0.2)
+                                            : (item.selected ? Theme.accent
+                                            : (ihit.has-hover ? Theme.hover : transparent));
                                         border-radius: 10px;
                                         border-width: idx == root.cursor ? 2px : 0;
                                         border-color: Theme.accent.brighter(0.4);
+                                        // Drop highlight (overlay, no layout impact).
+                                        if tile.drop-hit: Rectangle {
+                                            border-width: 2px;
+                                            border-color: #ffffff;
+                                            border-radius: 10px;
+                                        }
                                         VerticalLayout {
                                             padding: 10px;
                                             spacing: 6px;
@@ -602,7 +702,7 @@ export component Files inherits Window {
                                     ihit := RowHit {
                                         index: idx;
                                         is-selected: item.selected;
-                                        press(i, c, s) => { root.row-pressed(i, c, s); }
+                                        press(i, c, s) => { if (!item.selected || c || s) { root.row-pressed(i, c, s); } }
                                         open(i) => { root.activate(i); }
                                         context(i, mx, my, sel) => {
                                             if (!sel) { root.row-pressed(i, false, false); }
@@ -610,6 +710,13 @@ export component Files inherits Window {
                                             root.menu-y = my;
                                             ctx.show();
                                         }
+                                        drag-move(x, y) => {
+                                            if (!root.dragging) { root.dragging = true; root.drag-count = root.selection-count; }
+                                            root.drag-x = x;
+                                            root.drag-y = y;
+                                            root.update-drop-target();
+                                        }
+                                        drag-drop => { root.finish-drag(); }
                                     }
                                 }
                             }
@@ -617,13 +724,20 @@ export component Files inherits Window {
                             // --- List (compact rows) ---------------------------
                             if root.view == 1: VerticalLayout {
                                 alignment: start;
-                                for item[idx] in root.items: Rectangle {
+                                for item[idx] in root.items: lrow := Rectangle {
+                                    property <bool> drop-hit: root.dragging && item.is-dir && root.drop-row == idx;
                                     height: root.row-h;
-                                    background: item.selected ? Theme.accent
-                                        : (lhit.has-hover ? Theme.hover : transparent);
+                                    background: self.drop-hit ? Theme.accent.brighter(0.2)
+                                        : (item.selected ? Theme.accent
+                                        : (lhit.has-hover ? Theme.hover : transparent));
                                     border-radius: 6px;
                                     border-width: idx == root.cursor && !item.selected ? 1px : 0;
                                     border-color: Theme.accent.brighter(0.4);
+                                    if lrow.drop-hit: Rectangle {
+                                        border-width: 2px;
+                                        border-color: #ffffff;
+                                        border-radius: 6px;
+                                    }
                                     HorizontalLayout {
                                         padding-left: 8px;
                                         padding-right: 8px;
@@ -655,7 +769,7 @@ export component Files inherits Window {
                                     lhit := RowHit {
                                         index: idx;
                                         is-selected: item.selected;
-                                        press(i, c, s) => { root.row-pressed(i, c, s); }
+                                        press(i, c, s) => { if (!item.selected || c || s) { root.row-pressed(i, c, s); } }
                                         open(i) => { root.activate(i); }
                                         context(i, mx, my, sel) => {
                                             if (!sel) { root.row-pressed(i, false, false); }
@@ -663,6 +777,13 @@ export component Files inherits Window {
                                             root.menu-y = my;
                                             ctx.show();
                                         }
+                                        drag-move(x, y) => {
+                                            if (!root.dragging) { root.dragging = true; root.drag-count = root.selection-count; }
+                                            root.drag-x = x;
+                                            root.drag-y = y;
+                                            root.update-drop-target();
+                                        }
+                                        drag-drop => { root.finish-drag(); }
                                     }
                                 }
                             }
@@ -670,12 +791,18 @@ export component Files inherits Window {
                             // --- Details table ---------------------------------
                             if root.view == 2: VerticalLayout {
                                 alignment: start;
-                                for item[idx] in root.items: Rectangle {
+                                for item[idx] in root.items: drow := Rectangle {
+                                    property <bool> drop-hit: root.dragging && item.is-dir && root.drop-row == idx;
                                     height: root.row-h;
-                                    background: item.selected ? Theme.accent
-                                        : (dhit.has-hover ? Theme.hover : transparent);
+                                    background: self.drop-hit ? Theme.accent.brighter(0.2)
+                                        : (item.selected ? Theme.accent
+                                        : (dhit.has-hover ? Theme.hover : transparent));
                                     border-width: idx == root.cursor && !item.selected ? 1px : 0;
                                     border-color: Theme.accent.brighter(0.4);
+                                    if drow.drop-hit: Rectangle {
+                                        border-width: 2px;
+                                        border-color: #ffffff;
+                                    }
                                     HorizontalLayout {
                                         padding-left: 12px;
                                         padding-right: 12px;
@@ -729,7 +856,7 @@ export component Files inherits Window {
                                     dhit := RowHit {
                                         index: idx;
                                         is-selected: item.selected;
-                                        press(i, c, s) => { root.row-pressed(i, c, s); }
+                                        press(i, c, s) => { if (!item.selected || c || s) { root.row-pressed(i, c, s); } }
                                         open(i) => { root.activate(i); }
                                         context(i, mx, my, sel) => {
                                             if (!sel) { root.row-pressed(i, false, false); }
@@ -737,6 +864,13 @@ export component Files inherits Window {
                                             root.menu-y = my;
                                             ctx.show();
                                         }
+                                        drag-move(x, y) => {
+                                            if (!root.dragging) { root.dragging = true; root.drag-count = root.selection-count; }
+                                            root.drag-x = x;
+                                            root.drag-y = y;
+                                            root.update-drop-target();
+                                        }
+                                        drag-drop => { root.finish-drag(); }
                                     }
                                 }
                             }
@@ -841,6 +975,11 @@ export component Files inherits Window {
                     enabled: root.selection-count == 1;
                     chosen => { ctx.close(); root.open-rename(); }
                 }
+                MenuRow {
+                    label: "Properties";
+                    enabled: root.selection-count >= 1;
+                    chosen => { ctx.close(); root.show-properties(); }
+                }
                 Rectangle { height: 7px; Rectangle { height: 1px; background: Theme.hover; } }
                 MenuRow {
                     label: "Cut";
@@ -927,6 +1066,89 @@ export component Files inherits Window {
             init => {
                 pe.focus();
                 pe.select-all();
+            }
+        }
+    }
+
+    // Drag ghost following the cursor.
+    if root.dragging: Rectangle {
+        x: root.drag-x + 12px;
+        y: root.drag-y + 12px;
+        width: 96px;
+        height: 28px;
+        background: Theme.accent;
+        border-radius: 6px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000088;
+        Text {
+            text: root.drag-count + (root.drag-count == 1 ? " item" : " items");
+            color: #ffffff;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // Properties dialog.
+    if root.prop-visible: Rectangle {
+        background: Theme.overlay;
+        TouchArea {
+            clicked => { root.prop-visible = false; keys.focus(); }
+        }
+        Rectangle {
+            width: 440px;
+            height: 320px;
+            background: Theme.bg;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.hover;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000099;
+            TouchArea {}  // swallow clicks on the panel
+            VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+                HorizontalLayout {
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        FileIcon {
+                            width: 44px;
+                            height: 44px;
+                            kind: root.prop-kind;
+                            is-dir: root.prop-is-dir;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.prop-name;
+                            color: Theme.fg;
+                            font-size: 17px;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.prop-type;
+                            color: Theme.subtext;
+                            font-size: 12px;
+                        }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.hover; }
+                PropRow { label: "Where"; value: root.prop-where; }
+                PropRow { label: "Size"; value: root.prop-size; }
+                if root.prop-modified != "": PropRow { label: "Modified"; value: root.prop-modified; }
+                if root.prop-perms != "": PropRow { label: "Permissions"; value: root.prop-perms; }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    alignment: end;
+                    Button {
+                        text: "Close";
+                        clicked => { root.prop-visible = false; keys.focus(); }
+                    }
+                }
             }
         }
     }
