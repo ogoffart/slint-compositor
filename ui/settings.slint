@@ -1,0 +1,66 @@
+import { Button } from "std-widgets.slint";
+
+// A small settings dialog. For now it just lets you change the background.
+export component Settings inherits Rectangle {
+    callback change-background();
+    callback close();
+
+    background: #000000aa;
+
+    TouchArea {
+        clicked => {
+            root.close();
+        }
+    }
+
+    Rectangle {
+        width: 400px;
+        height: 200px;
+        background: #1e1e2e;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: #45475a;
+
+        TouchArea {}
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 14px;
+
+            Text {
+                text: "Settings";
+                color: #cdd6f4;
+                font-size: 18px;
+                font-weight: 700;
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: "Background image";
+                    color: #cdd6f4;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Change…";
+                    clicked => {
+                        root.change-background();
+                    }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+
+            HorizontalLayout {
+                alignment: end;
+                Button {
+                    text: "Close";
+                    clicked => {
+                        root.close();
+                    }
+                }
+            }
+        }
+    }
+}

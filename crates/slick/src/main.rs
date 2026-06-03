@@ -13,6 +13,7 @@ use std::time::Duration;
 use chrono::Local;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
+mod file_dialog;
 mod gl_bridge;
 use gl_bridge::{Frame, GlBridge};
 
@@ -106,6 +107,50 @@ fn main() -> anyhow::Result<()> {
                 slick_wayland::WindowId(id as u64),
             ));
         }
+    });
+
+    // Reusable file dialog (also used by the portal backend).
+    let fd_items = Rc::new(VecModel::<FileItem>::default());
+    desktop.set_file_dialog_items(ModelRc::from(fd_items.clone()));
+    let file_dialog: file_dialog::SharedController = Rc::new(RefCell::new(
+        file_dialog::Controller::new(desktop.as_weak(), fd_items),
+    ));
+
+    desktop.on_change_background({
+        let file_dialog = file_dialog.clone();
+        let weak = desktop.as_weak();
+        move || {
+            let weak = weak.clone();
+            file_dialog.borrow_mut().open(
+                "Select background image",
+                file_dialog::home_dir(),
+                true,
+                Box::new(move |path| {
+                    if let (Some(path), Some(d)) = (path, weak.upgrade()) {
+                        match slint::Image::load_from_path(&path) {
+                            Ok(image) => d.set_background_image(image),
+                            Err(err) => log::error!("failed to load image {path:?}: {err}"),
+                        }
+                    }
+                }),
+            );
+        }
+    });
+    desktop.on_fd_entry_clicked({
+        let file_dialog = file_dialog.clone();
+        move |idx| file_dialog.borrow_mut().entry_clicked(idx)
+    });
+    desktop.on_fd_go_up({
+        let file_dialog = file_dialog.clone();
+        move || file_dialog.borrow_mut().go_up()
+    });
+    desktop.on_fd_accept({
+        let file_dialog = file_dialog.clone();
+        move || file_dialog.borrow_mut().accept()
+    });
+    desktop.on_fd_cancel({
+        let file_dialog = file_dialog.clone();
+        move || file_dialog.borrow_mut().cancel()
     });
 
     // Launcher: run an arbitrary command, pointed at our compositor socket.
