@@ -867,6 +867,7 @@ fn main() -> anyhow::Result<()> {
         let notif = notif.clone();
         let osd_until = osd_until.clone();
         let switcher_until = switcher_until.clone();
+        let mut battery_low_warned = false;
         move || {
             let mut dirty = false;
 
@@ -933,7 +934,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            // Drain battery updates.
+            // Drain battery updates, and warn once when it gets low.
             if let Some(rx) = &battery_rx {
                 while let Ok(b) = rx.try_recv() {
                     if let Some(d) = weak.upgrade() {
@@ -941,6 +942,18 @@ fn main() -> anyhow::Result<()> {
                         d.set_battery_percent(b.percent as f32);
                         d.set_battery_charging(b.charging);
                         dirty = true;
+                    }
+                    if b.present && !b.charging && b.percent <= 15.0 {
+                        if !battery_low_warned {
+                            battery_low_warned = true;
+                            notif.internal(
+                                "Battery low",
+                                &format!("{}% remaining", b.percent.round() as i32),
+                            );
+                            dirty = true;
+                        }
+                    } else if b.charging || b.percent > 20.0 {
+                        battery_low_warned = false;
                     }
                 }
             }
