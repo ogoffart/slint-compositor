@@ -250,10 +250,29 @@ fn spawn_command(cmd: &str, wayland_display: Option<&str>) {
     // Children must connect to slick via WAYLAND_DISPLAY. Remove any inherited
     // WAYLAND_SOCKET (an fd slick received from its own host): libwayland prefers
     // it over WAYLAND_DISPLAY, which would make the child target the wrong
-    // compositor and fail with "permission denied".
+    // compositor and fail with "permission denied". Also drop DISPLAY so GUI
+    // toolkits don't silently fall back to X.
     command.env_remove("WAYLAND_SOCKET");
+    command.env_remove("DISPLAY");
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
     if let Some(display) = wayland_display {
         command.env("WAYLAND_DISPLAY", display);
+        // Point the child at the same runtime dir slick created its socket in,
+        // so it cannot end up looking in a different (inaccessible) directory.
+        if !runtime_dir.is_empty() {
+            command.env("XDG_RUNTIME_DIR", &runtime_dir);
+        }
+        let socket_path = format!("{runtime_dir}/{display}");
+        let exists = std::path::Path::new(&socket_path).exists();
+        log::info!(
+            "launching with WAYLAND_DISPLAY={display} XDG_RUNTIME_DIR={runtime_dir} \
+             (socket {socket_path} exists={exists})"
+        );
+    } else {
+        log::warn!(
+            "launching `{cmd}` but slick's WAYLAND_DISPLAY is not known yet; \
+             the child will inherit the host's environment"
+        );
     }
 
     match command.spawn() {
