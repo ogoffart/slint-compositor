@@ -78,6 +78,10 @@ fn main() -> Result<(), slint::PlatformError> {
     on!(on_sort_by, set_sort, |key|);
     {
         let b = browser.clone();
+        window.on_type_ahead(move |ch| b.borrow_mut().type_ahead(ch.as_str()));
+    }
+    {
+        let b = browser.clone();
         window.on_navigate_to(move |path| b.borrow_mut().navigate_to(path.as_str()));
     }
     {

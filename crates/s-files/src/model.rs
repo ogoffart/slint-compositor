@@ -58,6 +58,10 @@ pub struct Browser {
     show_hidden: bool,
     /// Lower-cased name filter from the search box (empty = no filter).
     filter: String,
+    /// File size for each visible row (0 for folders); parallel to `entries`.
+    sizes: Vec<u64>,
+    /// Whether the current directory could not be read.
+    unreadable: bool,
 }
 
 /// A shared, reference-counted browser.
@@ -81,6 +85,30 @@ impl Browser {
             sort_desc: false,
             show_hidden: false,
             filter: String::new(),
+            sizes: Vec::new(),
+            unreadable: false,
+        }
+    }
+
+    /// Jump the cursor to the next entry whose name starts with `ch` (cycling),
+    /// for keyboard type-ahead.
+    pub fn type_ahead(&mut self, ch: &str) {
+        let ch = ch.to_lowercase();
+        let n = self.entries.len();
+        if ch.is_empty() || n == 0 {
+            return;
+        }
+        let start = (self.cursor.max(0) as usize + 1) % n;
+        for k in 0..n {
+            let i = (start + k) % n;
+            let name = self.entries[i]
+                .file_name()
+                .map(|s| s.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if name.starts_with(&ch) {
+                self.set_single(i as i32);
+                return;
+            }
         }
     }
 
@@ -395,8 +423,22 @@ impl Browser {
             }
         }
         w.set_cursor(self.cursor);
-        w.set_selection_count(self.marks.iter().filter(|m| **m).count() as i32);
+        let count = self.marks.iter().filter(|m| **m).count();
+        w.set_selection_count(count as i32);
         w.set_can_paste(!self.clipboard.is_empty());
+        // Total size of the selected files (folders count as 0).
+        let total: u64 = self
+            .marks
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| **m)
+            .map(|(i, _)| self.sizes.get(i).copied().unwrap_or(0))
+            .sum();
+        w.set_selection_size(if count > 0 && total > 0 {
+            human_size(total).into()
+        } else {
+            Default::default()
+        });
 
         let path = if self.cursor >= 0 {
             self.entries.get(self.cursor as usize).cloned()
@@ -436,6 +478,7 @@ impl Browser {
         self.raw.clear();
 
         let readable = std::fs::read_dir(&self.cwd).is_ok();
+        self.unreadable = !readable;
         if let Ok(read) = std::fs::read_dir(&self.cwd) {
             for entry in read.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
@@ -534,6 +577,7 @@ impl Browser {
         });
 
         self.entries = list.iter().map(|e| e.path.clone()).collect();
+        self.sizes = list.iter().map(|e| if e.is_dir { 0 } else { e.len }).collect();
         let rows: Vec<FileItem> = list
             .iter()
             .map(|e| FileItem {
@@ -576,6 +620,8 @@ impl Browser {
             w.set_sort_desc(self.sort_desc);
             w.set_show_hidden(self.show_hidden);
             w.set_crumbs(Rc::new(VecModel::from(self.crumbs())).into());
+            w.set_is_empty(self.entries.is_empty());
+            w.set_unreadable(self.unreadable);
         }
         self.sync();
     }
@@ -911,6 +957,24 @@ mod tests {
         b.go_up();
         b.go_to(dir.to_str().unwrap());
         assert_eq!(names(&b).len(), 3);
+    }
+
+    #[test]
+    fn type_ahead_cycles_matches() {
+        let dir = scratch();
+        for n in ["apple.txt", "apricot.md", "banana.txt"] {
+            std::fs::write(dir.join(n), "x").unwrap();
+        }
+        let mut b = headless();
+        b.navigate(dir.clone()); // cursor at apple.txt (0)
+        b.type_ahead("a"); // next "a" after 0 -> apricot.md
+        assert_eq!(names(&b)[b.cursor as usize], "apricot.md");
+        b.type_ahead("a"); // wraps -> apple.txt
+        assert_eq!(names(&b)[b.cursor as usize], "apple.txt");
+        b.type_ahead("B"); // case-insensitive -> banana.txt
+        assert_eq!(names(&b)[b.cursor as usize], "banana.txt");
+        b.type_ahead("z"); // no match -> cursor unchanged
+        assert_eq!(names(&b)[b.cursor as usize], "banana.txt");
     }
 
     #[test]
