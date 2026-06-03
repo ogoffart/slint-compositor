@@ -1,15 +1,18 @@
 import { Theme } from "theme.slint";
 import { LineEdit } from "std-widgets.slint";
+import { MenuEntry } from "types.slint";
 
-// A simple run dialog: type a command and press Enter to launch it.
-// Shown as a full-screen dimming overlay; click outside the box to dismiss.
+// An app launcher: type to filter installed apps (the `results`, filtered by the
+// host), Enter or click to launch. With no matches, Enter runs the typed text as
+// a command. Shown as a dimming overlay; click outside or press Escape to close.
 export component Launcher inherits Rectangle {
-    callback launch(string);
+    in property <[MenuEntry]> results;
+    callback query-changed(string);
+    callback launch(string);   // run a command line
     callback dismiss();
 
     background: Theme.overlay;
 
-    // Click on the dimmed backdrop dismisses the launcher.
     TouchArea {
         clicked => {
             root.dismiss();
@@ -18,31 +21,74 @@ export component Launcher inherits Rectangle {
 
     Rectangle {
         width: min(480px, parent.width - 80px);
-        height: 56px;
+        height: box.preferred-height;
+        y: parent.height / 2 - 160px;
         background: Theme.bg;
-        border-radius: 10px;
+        border-radius: 12px;
         border-width: 1px;
         border-color: Theme.hover;
 
         // Swallow clicks on the box so they don't reach the backdrop.
         TouchArea {}
 
-        input := LineEdit {
-            width: parent.width - 24px;
-            font-size: 16px;
-            placeholder-text: "Run a command…";
-            accepted(text) => {
-                root.launch(text);
+        box := VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            input := LineEdit {
+                font-size: 16px;
+                placeholder-text: "Search apps or run a command…";
+                edited(text) => {
+                    root.query-changed(text);
+                }
+                accepted(text) => {
+                    // Launch the top match, or run the text as a command.
+                    if root.results.length > 0 {
+                        root.launch(root.results[0].command);
+                    } else if text != "" {
+                        root.launch(text);
+                    }
+                }
+            }
+
+            for e[i] in root.results: Rectangle {
+                height: 38px;
+                border-radius: 8px;
+                background: ta.has-hover || i == 0 ? Theme.surface : transparent;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 10px;
+                    Text {
+                        text: e.icon;
+                        font-size: 17px;
+                        width: 22px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: e.name;
+                        color: Theme.fg;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                }
+                ta := TouchArea {
+                    clicked => {
+                        root.launch(e.command);
+                    }
+                }
             }
         }
 
-        // Auto-focus the field each time the launcher appears.
         init => {
             input.focus();
+            root.query-changed("");
         }
     }
 
-    // Escape closes the launcher.
     FocusScope {
         key-pressed(event) => {
             if event.text == Key.Escape {

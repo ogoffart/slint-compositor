@@ -194,6 +194,33 @@ fn main() {
     );
     ui.set_start_menu_visible(false);
 
+    // App launcher with filtered results.
+    ui.set_launcher_results(
+        Rc::new(slint::VecModel::from(vec![
+            MenuEntry {
+                icon: "🌐".into(),
+                name: "Firefox".into(),
+                command: "firefox".into(),
+                kind: "app".into(),
+            },
+            MenuEntry {
+                icon: "🖥".into(),
+                name: "Terminal".into(),
+                command: "foot".into(),
+                kind: "app".into(),
+            },
+        ]))
+        .into(),
+    );
+    ui.set_launcher_visible(true);
+    save(
+        &ui,
+        &window,
+        PhysicalSize::new(1100, 720),
+        "shot_launcher.png",
+    );
+    ui.set_launcher_visible(false);
+
     // 5. Quick settings (volume + Wi-Fi) with tray icons in the panel.
     ui.set_tray_icons(
         Rc::new(slint::VecModel::from(vec![

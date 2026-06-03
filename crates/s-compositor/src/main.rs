@@ -120,6 +120,33 @@ fn main() -> anyhow::Result<()> {
     desktop.set_desktop_icons(ModelRc::from(Rc::new(VecModel::from(to_entries(&desktop_apps)))));
     desktop.set_panel_launchers(ModelRc::from(Rc::new(VecModel::from(to_entries(&panel_apps)))));
 
+    // App launcher: filter the app list as the query changes.
+    let launcher_model = Rc::new(VecModel::<MenuEntry>::default());
+    desktop.set_launcher_results(ModelRc::from(launcher_model.clone()));
+    desktop.on_launcher_query({
+        let menu_apps = menu_apps.clone();
+        let launcher_model = launcher_model.clone();
+        move |query| {
+            let q = query.to_lowercase();
+            let results: Vec<MenuEntry> = menu_apps
+                .iter()
+                .filter(|a| {
+                    q.is_empty()
+                        || a.name.to_lowercase().contains(&q)
+                        || a.command.to_lowercase().contains(&q)
+                })
+                .take(8)
+                .map(|a| MenuEntry {
+                    icon: a.icon.clone().into(),
+                    name: a.name.clone().into(),
+                    command: a.command.clone().into(),
+                    kind: "app".into(),
+                })
+                .collect();
+            launcher_model.set_vec(results);
+        }
+    });
+
     // Lock-screen password (empty = unlock on Enter).
     let lock_password: Rc<RefCell<String>> = Rc::new(RefCell::new(loaded.lock_password.clone()));
     desktop.set_lock_has_password(!lock_password.borrow().is_empty());

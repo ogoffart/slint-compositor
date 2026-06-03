@@ -266,6 +266,8 @@ export component Desktop inherits Window {
     in-out property <int> active-workspace: 0;
     in property <int> workspace-count: 4;
     in-out property <bool> launcher-visible: false;
+    in property <[MenuEntry]> launcher-results;
+    callback launcher-query(string);
     in-out property <bool> settings-visible: false;
     in-out property <bool> start-menu-visible: false;
     in-out property <bool> quick-settings-visible: false;
@@ -597,6 +599,10 @@ export component Desktop inherits Window {
         y: 0;
         width: parent.width;
         height: parent.height;
+        results: root.launcher-results;
+        query-changed(q) => {
+            root.launcher-query(q);
+        }
         launch(cmd) => {
             root.launch(cmd);
             root.launcher-visible = false;
