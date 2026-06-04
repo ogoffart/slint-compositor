@@ -36,7 +36,20 @@ impl SlickState {
                     entry.popup.send_popup_done();
                 }
             }
+            Command::CycleKeyboardLayout => self.cycle_keyboard_layout(),
         }
+    }
+
+    /// Advance to the next xkb layout and report the new active index to the UI.
+    fn cycle_keyboard_layout(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let active = keyboard.with_xkb_state(self, |mut ctx| {
+            ctx.cycle_next_layout();
+            ctx.xkb().lock().unwrap().active_layout().0 as usize
+        });
+        let _ = self.events.send(crate::Event::KeyboardLayout(active));
     }
 
     fn focus_window(&mut self, id: crate::WindowId) {

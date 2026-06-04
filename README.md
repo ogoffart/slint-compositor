@@ -58,6 +58,14 @@ Working today (verified nested under Xvfb + llvmpipe):
   `HH:MM` on one line when the panel is wide enough and stacks to two lines when
   it is narrow, an **xeyes-style applet** whose pupils follow the pointer, a
   **command launcher** (▶), a **taskbar**, and a **settings** button (⚙).
+- **Panel status applets**: a **battery** indicator (UPower), a **CPU/memory
+  system monitor**, an optional **keyboard-layout switcher** (click to cycle),
+  and a **Show Desktop** button that minimizes every window and restores them on
+  a second click.
+- **Start menu** (⊞): searchable app list plus power actions (run, lock,
+  suspend, restart, shut down, log out).
+- **Always on top**: pin a window from its title-bar right-click menu to keep it
+  stacked above the others.
 - **Theming**: accent colour and light/dark scheme, **persisted** to
   `s-compositor.conf` in the working directory and **published over the XDG
   `Settings` portal** (`org.freedesktop.appearance`) so apps follow it.
@@ -87,6 +95,14 @@ bind = Alt+Tab = next-window
 bind = Super+1 = workspace:1
 bind = Super+Shift+1 = move-to-workspace:1
 bind = Super+Equal = volume-up
+```
+
+To enable the panel's keyboard-layout switcher, list two or more xkb layouts in
+`s-compositor.conf` (the panel then shows the active layout's code; click it, or
+use the switcher, to cycle):
+
+```
+keyboard_layouts = us,fr,de
 ```
 
 Modifiers are `Super`/`Ctrl`/`Alt`/`Shift`; keys are letters, digits or names

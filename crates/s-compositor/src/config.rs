@@ -32,6 +32,9 @@ pub struct Config {
     pub lock_password: String,
     /// Global keyboard shortcuts. When empty, the defaults are used at startup.
     pub keybinds: Vec<crate::keybind::Keybind>,
+    /// Keyboard layouts (xkb names, e.g. `us`, `fr`). When more than one is set,
+    /// the panel shows a layout switcher. Empty means the single xkb default.
+    pub keyboard_layouts: Vec<String>,
 }
 
 impl Default for Config {
@@ -47,6 +50,7 @@ impl Default for Config {
             panel_apps: Vec::new(),
             lock_password: String::new(),
             keybinds: Vec::new(),
+            keyboard_layouts: Vec::new(),
         }
     }
 }
@@ -258,6 +262,12 @@ impl Config {
             self.background.as_deref().unwrap_or(""),
             self.lock_password,
         );
+        if !self.keyboard_layouts.is_empty() {
+            text.push_str(&format!(
+                "keyboard_layouts = {}\n",
+                self.keyboard_layouts.join(",")
+            ));
+        }
         // Start-menu apps, one per line: `app = icon | name | command`.
         for app in &self.menu {
             text.push_str(&format!(
@@ -316,6 +326,13 @@ impl Config {
                     self.background = (!value.is_empty()).then(|| value.to_string());
                 }
                 "lock_password" => self.lock_password = value.to_string(),
+                "keyboard_layouts" => {
+                    self.keyboard_layouts = value
+                        .split(',')
+                        .map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty())
+                        .collect();
+                }
                 "bind" => {
                     if let Some(b) = crate::keybind::parse(value) {
                         self.keybinds.push(b);
@@ -385,6 +402,7 @@ mod tests {
                 crate::keybind::parse("Super+d = start-menu").unwrap(),
                 crate::keybind::parse("Super+Equal = volume-up").unwrap(),
             ],
+            keyboard_layouts: vec!["us".to_string(), "fr".to_string()],
         };
         let mut parsed = Config::default();
         parsed.apply_str(&config.to_text());

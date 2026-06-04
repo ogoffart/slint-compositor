@@ -128,6 +128,15 @@ fn main() {
         position: LogicalPosition::new(60.0, 80.0),
     });
 
+    // Panel status applets: battery, system monitor and keyboard-layout switcher.
+    ui.set_battery_present(true);
+    ui.set_battery_percent(62.0);
+    ui.set_battery_charging(true);
+    ui.set_cpu_load(0.43);
+    ui.set_mem_load(0.71);
+    ui.set_keyboard_layout_visible(true);
+    ui.set_keyboard_layout("US".into());
+
     // 1. Wide top panel: clock on one line.
     ui.set_panel_edge(2); // Top
     ui.set_panel_size(72.0);

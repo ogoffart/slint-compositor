@@ -343,6 +343,13 @@ export component Desktop inherits Window {
     in property <bool> battery-present;
     in property <float> battery-percent;
     in property <bool> battery-charging;
+    // System load (0..1) for the panel monitor, and keyboard-layout switcher.
+    in property <float> cpu-load;
+    in property <float> mem-load;
+    in property <string> keyboard-layout;
+    in property <bool> keyboard-layout-visible;
+    callback cycle-keyboard-layout();
+    callback toggle-show-desktop();
     in property <bool> wifi-enabled;
     in property <[WifiNetwork]> wifi-networks;
     callback set-volume(float);
@@ -629,6 +636,13 @@ export component Desktop inherits Window {
         tray-icons: root.tray-icons;
         launchers: root.panel-launchers;
         muted: root.muted;
+        battery-present: root.battery-present;
+        battery-percent: root.battery-percent;
+        battery-charging: root.battery-charging;
+        cpu-load: root.cpu-load;
+        mem-load: root.mem-load;
+        keyboard-layout: root.keyboard-layout;
+        keyboard-layout-visible: root.keyboard-layout-visible;
         horizontal: root.panel-edge >= 2;
         edge: root.panel-edge;
         width: root.panel-edge >= 2 ? out.width : root.panel-size;
@@ -665,6 +679,12 @@ export component Desktop inherits Window {
         }
         tray-activate(id) => {
             root.tray-activate(id);
+        }
+        cycle-keyboard-layout => {
+            root.cycle-keyboard-layout();
+        }
+        show-desktop => {
+            root.toggle-show-desktop();
         }
     }
 

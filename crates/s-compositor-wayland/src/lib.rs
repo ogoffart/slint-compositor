@@ -9,6 +9,7 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use smithay::input::keyboard::XkbConfig;
 use smithay::input::SeatState;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -48,6 +49,9 @@ pub enum Event {
     WindowAdded(WindowId),
     WindowRemoved(WindowId),
     WindowTitleChanged(WindowId, String),
+    /// The active keyboard layout changed; carries the index into the configured
+    /// layout list.
+    KeyboardLayout(usize),
     /// XWayland is up; X11 apps should be launched with `DISPLAY=:{display}`.
     XwaylandReady {
         display: u32,
@@ -211,6 +215,8 @@ pub enum Command {
     },
     /// Dismiss all open popups (e.g. a click landed outside them).
     DismissPopups,
+    /// Advance to the next configured keyboard layout (panel layout switcher).
+    CycleKeyboardLayout,
 }
 
 /// Re-exported so the UI crate can hold the sending half.
@@ -249,6 +255,7 @@ impl std::fmt::Debug for Event {
                 .finish_non_exhaustive(),
             Event::WindowAdded(id) => f.debug_tuple("WindowAdded").field(id).finish(),
             Event::WindowRemoved(id) => f.debug_tuple("WindowRemoved").field(id).finish(),
+            Event::KeyboardLayout(i) => f.debug_tuple("KeyboardLayout").field(i).finish(),
             Event::XwaylandReady { display } => f
                 .debug_struct("XwaylandReady")
                 .field("display", display)
@@ -327,6 +334,7 @@ impl std::fmt::Debug for Event {
 pub fn run(
     events: Sender<Event>,
     commands: smithay::reexports::calloop::channel::Channel<Command>,
+    kb_layouts: Vec<String>,
 ) -> anyhow::Result<()> {
     let mut event_loop: EventLoop<SlickState> =
         EventLoop::try_new().context("failed to create calloop event loop")?;
@@ -351,7 +359,18 @@ pub fn run(
         smithay::wayland::xwayland_shell::XWaylandShellState::new::<SlickState>(&dh);
 
     let mut seat = seat_state.new_wl_seat(&dh, "seat0");
-    seat.add_keyboard(Default::default(), 200, 25)
+    // Configured keyboard layouts (e.g. `us,fr,de`); when more than one is set
+    // the panel shows a switcher that cycles between them.
+    let layout_spec = kb_layouts.join(",");
+    let xkb_config = if kb_layouts.is_empty() {
+        XkbConfig::default()
+    } else {
+        XkbConfig {
+            layout: &layout_spec,
+            ..Default::default()
+        }
+    };
+    seat.add_keyboard(xkb_config, 200, 25)
         .context("failed to add keyboard to seat")?;
     seat.add_pointer();
 

@@ -100,6 +100,150 @@ component PanelButton inherits Rectangle {
     }
 }
 
+// Battery charge indicator: a drawn cell whose fill and colour track the level,
+// with a charging bolt and the percentage. Lays out along the panel's long axis.
+component BatteryApplet {
+    in property <float> percent;   // 0..100
+    in property <bool> charging;
+    in property <bool> horizontal;
+    property <color> level: root.percent <= 15 ? #f38ba8
+        : root.percent <= 30 ? #f9e2af : #a6e3a1;
+
+    // The battery glyph: outline, proportional fill, terminal nub and bolt.
+    cell := Rectangle {
+        width: 30px;
+        height: 15px;
+        Rectangle {
+            width: 26px;
+            height: 15px;
+            x: 0;
+            border-radius: 3px;
+            border-width: 1.5px;
+            border-color: Theme.subtext;
+            Rectangle {
+                x: 2px;
+                y: 2.5px;
+                width: (parent.width - 4px) * max(0.04, min(1, root.percent / 100));
+                height: parent.height - 5px;
+                border-radius: 1px;
+                background: root.level;
+            }
+        }
+        Rectangle {
+            x: 26px;
+            y: 5px;
+            width: 2.5px;
+            height: 5px;
+            border-radius: 1px;
+            background: Theme.subtext;
+        }
+        if root.charging: Text {
+            x: 0;
+            width: 26px;
+            text: "⚡";
+            color: Theme.fg;
+            font-size: 10px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    pct := Text {
+        text: round(root.percent) + "%";
+        color: Theme.subtext;
+        font-size: 10px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    // Side by side on a horizontal panel; stacked on a vertical one.
+    states [
+        h when root.horizontal: {
+            cell.x: 0;
+            cell.y: (root.height - cell.height) / 2;
+            pct.x: cell.width + 4px;
+            pct.y: (root.height - pct.height) / 2;
+            root.preferred-width: cell.width + pct.preferred-width + 4px;
+            root.preferred-height: 15px;
+        }
+        v when !root.horizontal: {
+            cell.x: (root.width - cell.width) / 2;
+            cell.y: 0;
+            pct.x: (root.width - pct.width) / 2;
+            pct.y: cell.height + 1px;
+            root.preferred-width: 30px;
+            root.preferred-height: cell.height + pct.preferred-height + 1px;
+        }
+    ]
+}
+
+// One labelled load bar (CPU or memory): a track with a fill scaled by `value`.
+component LoadBar inherits Rectangle {
+    in property <string> label;
+    in property <float> value;   // 0..1
+    in property <color> fill: Theme.accent;
+    width: 12px;
+    VerticalLayout {
+        spacing: 1px;
+        Rectangle {
+            vertical-stretch: 1;
+            width: 10px;
+            border-radius: 2px;
+            background: Theme.surface;
+            Rectangle {
+                width: parent.width;
+                height: parent.height * min(1, max(0, root.value));
+                y: parent.height - self.height;
+                border-radius: 2px;
+                background: root.fill;
+            }
+        }
+        Text {
+            text: root.label;
+            color: Theme.subtext;
+            font-size: 8px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// CPU + memory mini-monitor.
+component LoadMonitor inherits Rectangle {
+    in property <float> cpu;
+    in property <float> mem;
+    HorizontalLayout {
+        spacing: 3px;
+        alignment: center;
+        LoadBar { label: "C"; value: root.cpu; fill: #89b4fa; height: 30px; }
+        LoadBar { label: "M"; value: root.mem; fill: #a6e3a1; height: 30px; }
+    }
+}
+
+// Keyboard layout indicator/switcher: shows the active layout code; click cycles.
+component LayoutSwitcher inherits Rectangle {
+    in property <string> layout;
+    callback clicked();
+    width: 34px;
+    height: 26px;
+    border-radius: 6px;
+    background: ta.has-hover ? Theme.surface : Theme.panel;
+    border-width: 1px;
+    border-color: Theme.hover;
+    Text {
+        text: root.layout == "" ? "?" : root.layout;
+        color: Theme.fg;
+        font-size: 12px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 // A taskbar entry for one window: its icon and title.
 component TaskItem inherits Rectangle {
     in property <WindowTile> tile;
@@ -195,6 +339,15 @@ export component Panel inherits Rectangle {
     in property <[MenuEntry]> launchers;
     in property <bool> muted;
     in property <bool> dnd;
+    in property <bool> battery-present;
+    in property <float> battery-percent;
+    in property <bool> battery-charging;
+    in property <float> cpu-load;
+    in property <float> mem-load;
+    in property <string> keyboard-layout;
+    in property <bool> keyboard-layout-visible;
+    callback cycle-keyboard-layout();
+    callback show-desktop();
     callback toggle-start-menu();
     callback toggle-settings();
     callback toggle-quick-settings();
@@ -254,6 +407,21 @@ export component Panel inherits Rectangle {
         }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; clicked => { root.toggle-calendar(); } }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
+        Rectangle { height: 1px; background: Theme.surface; }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            LoadMonitor { cpu: root.cpu-load; mem: root.mem-load; }
+            if root.keyboard-layout-visible: LayoutSwitcher {
+                layout: root.keyboard-layout;
+                clicked => { root.cycle-keyboard-layout(); }
+            }
+        }
+        if root.battery-present: BatteryApplet {
+            percent: root.battery-percent;
+            charging: root.battery-charging;
+            horizontal: false;
+        }
         if root.tray-icons.length > 0: Rectangle { height: 1px; background: Theme.surface; }
         TrayStrip {
             items: root.tray-icons;
@@ -279,7 +447,13 @@ export component Panel inherits Rectangle {
                 activate => { root.activate(win.id); }
             }
         }
-        Text { text: "•••"; color: Theme.subtext; horizontal-alignment: center; }
+        PanelButton {
+            icon: "🖥";
+            height: 36px;
+            tooltip: "Show desktop";
+            edge: root.edge;
+            clicked => { root.show-desktop(); }
+        }
     }
 
     if root.horizontal: HorizontalLayout {
@@ -328,6 +502,17 @@ export component Panel inherits Rectangle {
         }
         Clock { hours: root.clock-hours; minutes: root.clock-minutes; clicked => { root.toggle-calendar(); } }
         Eyes { cursor-x: root.cursor-x; cursor-y: root.cursor-y; }
+        Rectangle { width: 1px; background: Theme.surface; }
+        LoadMonitor { cpu: root.cpu-load; mem: root.mem-load; }
+        if root.keyboard-layout-visible: LayoutSwitcher {
+            layout: root.keyboard-layout;
+            clicked => { root.cycle-keyboard-layout(); }
+        }
+        if root.battery-present: BatteryApplet {
+            percent: root.battery-percent;
+            charging: root.battery-charging;
+            horizontal: true;
+        }
         if root.tray-icons.length > 0: Rectangle { width: 1px; background: Theme.surface; }
         TrayStrip {
             items: root.tray-icons;
@@ -353,6 +538,12 @@ export component Panel inherits Rectangle {
                 activate => { root.activate(win.id); }
             }
         }
-        Text { text: "•••"; color: Theme.subtext; vertical-alignment: center; }
+        PanelButton {
+            icon: "🖥";
+            width: 36px;
+            tooltip: "Show desktop";
+            edge: root.edge;
+            clicked => { root.show-desktop(); }
+        }
     }
 }

@@ -24,6 +24,7 @@ mod notify;
 mod portal;
 mod power;
 mod session;
+mod sysmon;
 mod volume;
 use gl_bridge::{Frame, GlBridge};
 
@@ -70,21 +71,25 @@ fn main() -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let _runtime_guard = runtime.enter();
 
-    // Spawn the Wayland compositor on its own thread.
+    // Load persisted settings from the working directory.
+    let loaded = config::Config::load();
+
+    // Spawn the Wayland compositor on its own thread, handing it the configured
+    // keyboard layouts so the seat is created with them.
     let (tx, rx) = channel::<s_compositor_wayland::Event>();
     let (cmd_tx, cmd_rx) = s_compositor_wayland::command_channel();
+    let kb_layouts = loaded.keyboard_layouts.clone();
     std::thread::Builder::new()
         .name("s-compositor-wayland".into())
         .spawn(move || {
-            if let Err(err) = s_compositor_wayland::run(tx, cmd_rx) {
+            if let Err(err) = s_compositor_wayland::run(tx, cmd_rx, kb_layouts) {
                 log::error!("wayland thread exited: {err:?}");
             }
         })?;
 
     let desktop = Desktop::new()?;
 
-    // Load persisted settings from the working directory and apply them.
-    let loaded = config::Config::load();
+    // Apply the loaded settings to the UI.
     let bg_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(loaded.background.clone()));
     apply_config(&desktop, &loaded);
 
@@ -189,6 +194,21 @@ fn main() -> anyhow::Result<()> {
         keybind::defaults()
     } else {
         loaded.keybinds.clone()
+    });
+
+    // Keyboard-layout switcher: only shown when more than one layout is set. The
+    // panel displays the active layout's short code; clicking cycles in the
+    // compositor, which reports the new active index back via an event.
+    let kb_layout_codes: Rc<Vec<String>> = Rc::new(loaded.keyboard_layouts.clone());
+    desktop.set_keyboard_layout_visible(kb_layout_codes.len() > 1);
+    if let Some(first) = kb_layout_codes.first() {
+        desktop.set_keyboard_layout(first.to_uppercase().into());
+    }
+    desktop.on_cycle_keyboard_layout({
+        let cmd_tx = cmd_tx.clone();
+        move || {
+            let _ = cmd_tx.send(s_compositor_wayland::Command::CycleKeyboardLayout);
+        }
     });
 
     let model = Rc::new(VecModel::<WindowTile>::default());
@@ -311,11 +331,13 @@ fn main() -> anyhow::Result<()> {
         let bg_path = bg_path.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
+        let keyboard_layouts = kb_layout_codes.clone();
         move || {
             let weak = weak.clone();
             let bg_path = bg_path.clone();
             let lock_password = lock_password.clone();
             let keybinds = keybinds.clone();
+            let keyboard_layouts = keyboard_layouts.clone();
             file_dialog.borrow_mut().open(
                 "Select background image",
                 file_dialog::home_dir(),
@@ -326,7 +348,14 @@ fn main() -> anyhow::Result<()> {
                             Ok(image) => {
                                 d.set_background_image(image);
                                 *bg_path.borrow_mut() = Some(path.to_string_lossy().into_owned());
-                                current_config(&d, &bg_path, &lock_password, &keybinds).save();
+                                current_config(
+                                    &d,
+                                    &bg_path,
+                                    &lock_password,
+                                    &keybinds,
+                                    &keyboard_layouts,
+                                )
+                                .save();
                             }
                             Err(err) => log::error!("failed to load image {path:?}: {err}"),
                         }
@@ -343,9 +372,10 @@ fn main() -> anyhow::Result<()> {
         let appearance_tx = appearance_tx.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
+        let keyboard_layouts = kb_layout_codes.clone();
         move || {
             if let Some(d) = weak.upgrade() {
-                current_config(&d, &bg_path, &lock_password, &keybinds).save();
+                current_config(&d, &bg_path, &lock_password, &keybinds, &keyboard_layouts).save();
                 let _ = appearance_tx.try_send(current_appearance(&d));
             }
         }
@@ -363,6 +393,7 @@ fn main() -> anyhow::Result<()> {
         let bg_path = bg_path.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
+        let keyboard_layouts = kb_layout_codes.clone();
         move |list, index, field, value| {
             let model = match list {
                 1 => &desk,
@@ -379,7 +410,7 @@ fn main() -> anyhow::Result<()> {
                 model.set_row_data(index as usize, e);
             }
             if let Some(d) = weak.upgrade() {
-                current_config(&d, &bg_path, &lock_password, &keybinds).save();
+                current_config(&d, &bg_path, &lock_password, &keybinds, &keyboard_layouts).save();
             }
         }
     });
@@ -393,6 +424,7 @@ fn main() -> anyhow::Result<()> {
         let bg_path = bg_path.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
+        let keyboard_layouts = kb_layout_codes.clone();
         move |list| {
             let model = match list {
                 1 => &desk,
@@ -406,7 +438,7 @@ fn main() -> anyhow::Result<()> {
                 kind: "app".into(),
             });
             if let Some(d) = weak.upgrade() {
-                current_config(&d, &bg_path, &lock_password, &keybinds).save();
+                current_config(&d, &bg_path, &lock_password, &keybinds, &keyboard_layouts).save();
             }
         }
     });
@@ -420,6 +452,7 @@ fn main() -> anyhow::Result<()> {
         let bg_path = bg_path.clone();
         let lock_password = lock_password.clone();
         let keybinds = keybinds.clone();
+        let keyboard_layouts = kb_layout_codes.clone();
         move |list, index| {
             let model = match list {
                 1 => &desk,
@@ -431,7 +464,7 @@ fn main() -> anyhow::Result<()> {
                 model.remove(i);
             }
             if let Some(d) = weak.upgrade() {
-                current_config(&d, &bg_path, &lock_password, &keybinds).save();
+                current_config(&d, &bg_path, &lock_password, &keybinds, &keyboard_layouts).save();
             }
         }
     });
@@ -479,6 +512,47 @@ fn main() -> anyhow::Result<()> {
                     tile.minimized = true;
                     tile.focused = false;
                     model.set_row_data(row, tile);
+                }
+            }
+        }
+    });
+
+    // Show desktop: minimize every visible window on the active workspace, and
+    // restore exactly those on the next click (classic peek-the-desktop toggle).
+    let show_desktop_saved: Rc<RefCell<Vec<u64>>> = Rc::new(RefCell::new(Vec::new()));
+    desktop.on_toggle_show_desktop({
+        let model = model.clone();
+        let windows = windows.clone();
+        let weak = desktop.as_weak();
+        let saved = show_desktop_saved.clone();
+        move || {
+            let Some(d) = weak.upgrade() else {
+                return;
+            };
+            let ws = d.get_active_workspace();
+            let mut saved = saved.borrow_mut();
+            if saved.is_empty() {
+                for i in 0..model.row_count() {
+                    if let Some(mut tile) = model.row_data(i) {
+                        if tile.workspace == ws && !tile.minimized {
+                            saved.push(tile.id as u64);
+                            tile.minimized = true;
+                            tile.focused = false;
+                            model.set_row_data(i, tile);
+                        }
+                    }
+                }
+                windows.borrow_mut().focused = None;
+            } else {
+                let ids = std::mem::take(&mut *saved);
+                let w = windows.borrow();
+                for id in ids {
+                    if let Some(&row) = w.rows.get(&id) {
+                        if let Some(mut tile) = model.row_data(row) {
+                            tile.minimized = false;
+                            model.set_row_data(row, tile);
+                        }
+                    }
                 }
             }
         }
@@ -644,6 +718,9 @@ fn main() -> anyhow::Result<()> {
 
     // Battery status via UPower.
     let battery_rx = power::spawn();
+
+    // CPU / memory load for the panel's system monitor.
+    let sysmon_rx = sysmon::spawn();
 
     // Lock screen: unlock when the typed password matches (or none is set).
     desktop.on_unlock({
@@ -988,6 +1065,7 @@ fn main() -> anyhow::Result<()> {
         let notif = notif.clone();
         let osd_until = osd_until.clone();
         let switcher_until = switcher_until.clone();
+        let kb_layout_codes = kb_layout_codes.clone();
         let mut battery_low_warned = false;
         move || {
             let mut dirty = false;
@@ -1078,6 +1156,16 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+            // Drain system-load samples.
+            if let Some(rx) = &sysmon_rx {
+                while let Ok(load) = rx.try_recv() {
+                    if let Some(d) = weak.upgrade() {
+                        d.set_cpu_load(load.cpu);
+                        d.set_mem_load(load.mem);
+                        dirty = true;
+                    }
+                }
+            }
             let active_ws = weak
                 .upgrade()
                 .map(|d| d.get_active_workspace())
@@ -1125,6 +1213,17 @@ fn main() -> anyhow::Result<()> {
                             .set_size(slint::PhysicalSize::new(bw as u32, bh as u32));
                     }
                     dirty = true;
+                    continue;
+                }
+                // The active keyboard layout changed: show its short code in the
+                // panel switcher.
+                if let s_compositor_wayland::Event::KeyboardLayout(idx) = &event {
+                    if let Some(d) = weak.upgrade() {
+                        if let Some(code) = kb_layout_codes.get(*idx) {
+                            d.set_keyboard_layout(code.to_uppercase().into());
+                            dirty = true;
+                        }
+                    }
                     continue;
                 }
                 // Client-initiated (un)maximize reuses the work-area logic so it
@@ -1769,6 +1868,7 @@ fn current_config(
     bg: &Rc<RefCell<Option<String>>>,
     lock_password: &Rc<RefCell<String>>,
     keybinds: &Rc<Vec<keybind::Keybind>>,
+    keyboard_layouts: &Rc<Vec<String>>,
 ) -> config::Config {
     let theme = d.global::<Theme>();
     let read = |model: ModelRc<MenuEntry>| -> Vec<config::AppEntry> {
@@ -1793,6 +1893,7 @@ fn current_config(
         panel_apps: read(d.get_panel_launchers()),
         lock_password: lock_password.borrow().clone(),
         keybinds: (**keybinds).clone(),
+        keyboard_layouts: (**keyboard_layouts).clone(),
     }
 }
 
