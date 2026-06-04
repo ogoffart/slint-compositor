@@ -40,6 +40,8 @@ struct Windows {
     rows: HashMap<u64, usize>,
     /// Latest frame per window awaiting GPU upload (drained in the notifier).
     pending: HashMap<u64, Frame>,
+    /// Latest dmabuf (GPU buffer) frame per window awaiting EGLImage import.
+    pending_dmabuf: HashMap<u64, gl_bridge::DmabufFrame>,
     /// Windows removed since the last frame, whose textures must be freed.
     closed: Vec<u64>,
     /// Newly-mapped windows whose `appearing` flag should be cleared next tick
@@ -226,6 +228,25 @@ fn main() -> anyhow::Result<()> {
                     for id in std::mem::take(&mut windows.closed) {
                         bridge.remove(id);
                     }
+                    // GPU (dmabuf) frames: import as EGLImage textures (toplevels
+                    // only for now). Best-effort — a failed import keeps the
+                    // previous frame.
+                    let dmabufs: Vec<(u64, gl_bridge::DmabufFrame)> =
+                        windows.pending_dmabuf.drain().collect();
+                    for (id, frame) in dmabufs {
+                        let Some(image) = bridge.import_dmabuf(id, &frame) else {
+                            continue;
+                        };
+                        if let Some(&row) = windows.rows.get(&id) {
+                            if let Some(mut tile) = model.row_data(row) {
+                                tile.texture = image;
+                                tile.width = frame.width as f32;
+                                tile.height = frame.height as f32;
+                                model.set_row_data(row, tile);
+                            }
+                        }
+                    }
+
                     let frames: Vec<(u64, Frame)> = windows.pending.drain().collect();
                     for (id, frame) in frames {
                         let Some(image) = bridge.upload(id, &frame) else {
@@ -1174,6 +1195,33 @@ fn handle_event(
         // `Ready` is intercepted at the call site (it needs the window handle to
         // size the canvas to the output layout), so it never reaches here.
         Event::Ready { .. } => false,
+        Event::WindowDmabuf {
+            id,
+            width,
+            height,
+            fourcc,
+            modifier,
+            planes,
+        } => {
+            // Single-plane import for now; queue it for the rendering notifier.
+            if let Some(plane) = planes.into_iter().next() {
+                windows.borrow_mut().pending_dmabuf.insert(
+                    id.0,
+                    gl_bridge::DmabufFrame {
+                        width,
+                        height,
+                        fourcc,
+                        modifier,
+                        fd: plane.fd,
+                        offset: plane.offset,
+                        stride: plane.stride,
+                    },
+                );
+                true
+            } else {
+                false
+            }
+        }
         Event::WindowBuffer {
             id,
             width,

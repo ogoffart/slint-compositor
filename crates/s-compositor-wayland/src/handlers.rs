@@ -72,6 +72,14 @@ impl CompositorHandler for SlickState {
         // Toplevel window?
         if let Some(entry) = self.windows.get(&root) {
             let (id, decorated) = (entry.id, entry.decorated);
+            // GPU (dmabuf) buffer? Hand the planes to the UI thread to import.
+            if self.dmabuf_enabled {
+                if let Some(event) = take_dmabuf(&root, id, &mut callbacks) {
+                    self.pending_callbacks.append(&mut callbacks);
+                    let _ = self.events.send(event);
+                    return;
+                }
+            }
             let title = read_title(&root);
             let app_id = read_app_id(&root);
             let mut cache = std::mem::take(&mut self.surface_pixels);
@@ -641,6 +649,73 @@ impl WlrLayerShellHandler for SlickState {
 
 delegate_compositor!(SlickState);
 delegate_shm!(SlickState);
+
+impl smithay::wayland::dmabuf::DmabufHandler for SlickState {
+    fn dmabuf_state(&mut self) -> &mut smithay::wayland::dmabuf::DmabufState {
+        &mut self.dmabuf_state
+    }
+    fn dmabuf_imported(
+        &mut self,
+        _global: &smithay::wayland::dmabuf::DmabufGlobal,
+        _dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+        notifier: smithay::wayland::dmabuf::ImportNotifier,
+    ) {
+        // The real EGLImage import happens on the render thread (which owns the
+        // GL context) when the buffer is committed; accept it here optimistically.
+        let _ = notifier.successful::<SlickState>();
+    }
+}
+smithay::delegate_dmabuf!(SlickState);
+
+/// If the root surface's pending buffer is a dmabuf, take it, drain its frame
+/// callbacks, dup its plane fds into a [`Event::WindowDmabuf`], and release it.
+/// Returns `None` (leaving the buffer in place for shm compositing) otherwise.
+fn take_dmabuf(
+    root: &WlSurface,
+    id: crate::WindowId,
+    callbacks: &mut Vec<smithay::reexports::wayland_server::protocol::wl_callback::WlCallback>,
+) -> Option<Event> {
+    use smithay::backend::allocator::Buffer;
+    use smithay::wayland::dmabuf::get_dmabuf;
+    with_states(root, |states| {
+        let mut guard = states.cached_state.get::<SurfaceAttributes>();
+        let attrs = guard.current();
+        let is_dmabuf = matches!(
+            &attrs.buffer,
+            Some(BufferAssignment::NewBuffer(b)) if get_dmabuf(b).is_ok()
+        );
+        if !is_dmabuf {
+            return None;
+        }
+        callbacks.append(&mut attrs.frame_callbacks);
+        let buffer = match attrs.buffer.take() {
+            Some(BufferAssignment::NewBuffer(b)) => b,
+            _ => return None,
+        };
+        let dmabuf = get_dmabuf(&buffer).ok()?;
+        let planes: Vec<crate::DmabufPlane> = dmabuf
+            .handles()
+            .zip(dmabuf.offsets())
+            .zip(dmabuf.strides())
+            .filter_map(|((fd, offset), stride)| {
+                fd.try_clone_to_owned()
+                    .ok()
+                    .map(|fd| crate::DmabufPlane { fd, offset, stride })
+            })
+            .collect();
+        let format = dmabuf.format();
+        let event = Event::WindowDmabuf {
+            id,
+            width: dmabuf.width(),
+            height: dmabuf.height(),
+            fourcc: format.code as u32,
+            modifier: u64::from(format.modifier),
+            planes,
+        };
+        buffer.release();
+        Some(event)
+    })
+}
 delegate_xdg_shell!(SlickState);
 smithay::delegate_xdg_decoration!(SlickState);
 smithay::delegate_layer_shell!(SlickState);

@@ -45,6 +45,11 @@ pub struct SlickState {
     pub output: Output,
     /// All advertised outputs (kept alive so their `wl_output` globals persist).
     pub outputs: Vec<Output>,
+    /// dmabuf (GPU buffer) protocol state; the global is only created when the
+    /// experimental `S_COMPOSITOR_DMABUF` env var is set.
+    pub dmabuf_state: smithay::wayland::dmabuf::DmabufState,
+    pub dmabuf_global: Option<smithay::wayland::dmabuf::DmabufGlobal>,
+    pub dmabuf_enabled: bool,
 
     pub workspaces: Workspaces,
     pub next_window_id: u64,
