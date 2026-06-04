@@ -2673,6 +2673,14 @@ mod shot {
             d.set_settings_visible(true);
             d.set_settings_tab(1);
         }
+        if std::env::var("SCOMP_SHOT_STARTMENU").is_ok() {
+            d.set_start_menu_entries(model(vec![
+                ("🌐", "Firefox", "firefox"),
+                ("🖥", "Terminal", "alacritty"),
+                ("🗂", "Files", "s-files"),
+            ]));
+            d.set_start_menu_visible(true);
+        }
         d.show().unwrap();
         window.window().request_redraw();
 

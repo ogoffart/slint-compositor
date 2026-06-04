@@ -40,10 +40,18 @@ component MenuRow inherits Rectangle {
 }
 
 // A Windows-style start menu: a list of configurable apps plus power actions
-// (run a command, lock the screen, log out). Shown as a dimming overlay anchored
-// to the bottom-left; click the backdrop or press Escape to dismiss.
+// (run a command, lock the screen, log out). Shown as a dimming overlay; the
+// menu panel is anchored next to the Start button (i.e. against the panel, at
+// its near end). Click the backdrop or press Escape to dismiss.
 export component StartMenu inherits Rectangle {
     in property <[MenuEntry]> entries;
+    // Where the panel (and its Start button) is, so the menu opens beside it.
+    in property <int> panel-edge;        // 0=Right 1=Left 2=Top 3=Bottom
+    in property <length> panel-size;
+    in property <length> anchor-x;       // primary output rect (the menu's screen)
+    in property <length> anchor-y;
+    in property <length> anchor-w;
+    in property <length> anchor-h;
     callback query-changed(string);
     callback launch(string);
     callback run();
@@ -63,8 +71,14 @@ export component StartMenu inherits Rectangle {
     }
 
     Rectangle {
-        x: 12px;
-        y: parent.height - self.height - 12px;
+        // Sit against the panel, aligned to its near end (top for a vertical
+        // panel, left for a horizontal one) so it appears by the Start button.
+        x: root.panel-edge == 0 ? root.anchor-x + root.anchor-w - root.panel-size - self.width - 12px
+            : root.panel-edge == 1 ? root.anchor-x + root.panel-size + 12px
+            : root.anchor-x + 12px;
+        y: root.panel-edge == 2 ? root.anchor-y + root.panel-size + 12px
+            : root.panel-edge == 3 ? root.anchor-y + root.anchor-h - self.height - 12px
+            : root.anchor-y + 12px;
         width: 290px;
         height: menu.preferred-height;
         background: Theme.bg;

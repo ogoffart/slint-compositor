@@ -854,6 +854,12 @@ export component Desktop inherits Window {
         width: parent.width;
         height: parent.height;
         entries: root.start-menu-entries;
+        panel-edge: root.panel-edge;
+        panel-size: root.panel-size;
+        anchor-x: root.outputs[0].x;
+        anchor-y: root.outputs[0].y;
+        anchor-w: root.outputs[0].width;
+        anchor-h: root.outputs[0].height;
         query-changed(q) => {
             root.start-menu-query(q);
         }
