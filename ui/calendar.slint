@@ -1,5 +1,6 @@
 import { Theme } from "theme.slint";
 import { CalendarDay } from "types.slint";
+import { CloseButton } from "close_button.slint";
 
 // A small month calendar shown when the panel clock is clicked. Dimming overlay
 // centred on screen; click the backdrop or press Escape to dismiss.
@@ -65,6 +66,11 @@ export component CalendarPopover inherits Rectangle {
                     }
                 }
             }
+        }
+        CloseButton {
+            x: parent.width - self.width - 10px;
+            y: 10px;
+            clicked => { root.dismiss(); }
         }
     }
 
