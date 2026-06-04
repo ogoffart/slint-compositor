@@ -1,13 +1,24 @@
-A Wayland desktop shell written in Rust, using [Slint](https://slint.dev) for the
-UI and [Smithay](https://smithay.github.io/) for the Wayland protocol.
+# s-compositor
 
-## Building & running
+A small but complete **Wayland desktop** written in Rust — a compositor, a
+panel, a start menu, notifications, a system tray, a settings app and a file
+manager, all in one. It uses [Slint](https://slint.dev) for the interface and
+[Smithay](https://smithay.github.io/) for the Wayland protocol.
 
-### 1. System prerequisites
+You can run it two ways:
 
-You need a Rust toolchain (stable, install via [rustup](https://rustup.rs)) and a
-few system libraries. The renderer is Skia (built from source by `skia-bindings`,
-which needs a C/C++ toolchain), and the seat/keymap handling needs `libxkbcommon`.
+- **Nested** — in a window inside your current X11/Wayland session. This is the
+  easiest way to try it out (see [Quick start](#quick-start)).
+- **On bare metal** — directly on a Linux TTY (no X11/Wayland needed),
+  via the `linuxkms` backend.
+
+## Quick start
+
+### 1. Install the prerequisites
+
+You need a Rust toolchain (stable — install via [rustup](https://rustup.rs)) and
+a few system libraries. The renderer is Skia (compiled from source the first
+time, so a C/C++ toolchain is required).
 
 On Debian/Ubuntu:
 
@@ -16,144 +27,108 @@ sudo apt install build-essential clang libxkbcommon-dev libfontconfig-1-dev \
     libudev-dev libseat-dev libinput-dev libgbm-dev libdrm-dev libpulse-dev
 ```
 
-The `libudev`/`libseat`/`libinput`/`libgbm`/`libdrm` packages are needed because
-the bare-metal `backend-linuxkms` backend is enabled by default (so the shell can
-run directly on a TTY without an X11/Wayland session).
+### 2. Install a terminal (and other apps)
 
-> **Note:** the linker needs the `libxkbcommon.so` *development* symlink, not just
-> the runtime `libxkbcommon.so.0`. If you see `error: unable to find library
-> -lxkbcommon` at link time, install `libxkbcommon-dev` (the command above) — or,
-> if only the runtime lib is present, symlink it:
-> `sudo ln -s libxkbcommon.so.0 /usr/lib/x86_64-linux-gnu/libxkbcommon.so`.
-
-### 2. Install a terminal (Alacritty)
-
-s-compositor uses **[Alacritty](https://alacritty.org)** — a fast, Wayland-native
-terminal written in Rust — as its **default terminal** (the desktop right-click
-"Open Terminal" entry, the panel/start-menu launchers, and the `Super+Return`
-shortcut all spawn it). Install it so the terminal works out of the box:
+The desktop is just a shell — it launches *other* programs. Most importantly,
+**install a terminal**: the default terminal is
+**[Alacritty](https://alacritty.org)** (a fast, Wayland-native terminal written
+in Rust), spawned by the `Super`+`Return` shortcut, the desktop right-click
+"Open Terminal" entry, and the panel / start-menu launchers.
 
 ```sh
 cargo install alacritty        # from crates.io, or:
 sudo apt install alacritty     # on recent Debian/Ubuntu
 ```
 
-Other Rust terminals (WezTerm) and common ones (foot, kitty) are auto-detected if
-Alacritty is absent; prefer Alacritty for the smoothest nested experience. Avoid
-`gnome-terminal` when running nested — it is a D-Bus single-instance app and opens
-in your *outer* session rather than inside s-compositor.
+If Alacritty isn't present, other terminals (WezTerm, foot, kitty) are
+auto-detected — but avoid `gnome-terminal` when running nested, as it is a D-Bus
+single-instance app and opens in your *outer* session instead.
 
-### 3. Build & run
+A web browser (e.g. `firefox`) is picked up automatically too, and the file
+manager (`s-files`) is built and bundled for you — no extra install needed.
+
+### 3. Build and run
 
 ```sh
-cargo build
-cargo run -p s-compositor   # runs nested inside your current X11/Wayland session
+cargo run
 ```
 
-`cargo run` opens a window for the shell. It then prints the `WAYLAND_DISPLAY` it
-created; point a Wayland client at that socket to see it composited:
+This opens a window running the whole desktop. It prints the `WAYLAND_DISPLAY`
+it created (e.g. `wayland-1`); any Wayland client pointed at that socket appears
+inside it:
 
 ```sh
 WAYLAND_DISPLAY=wayland-1 alacritty
 ```
 
-Settings (panel edge/size, theme, accent, background) are reachable from the ⚙
-button and persisted to `s-compositor.conf` in the working directory.
+…but normally you just launch apps from the panel, the start menu (⊞), the
+command launcher (▶), or your keyboard shortcuts.
 
-Bare metal uses `backend-linuxkms` (runs directly on a TTY).
+> **Tip:** when running nested, **resizing the window resizes the desktop** —
+> the wallpaper, panel and apps reflow to fit.
 
-## Architecture
+> **If launching an app fails** (e.g. the program isn't installed), the desktop
+> shows a *"Couldn't open application"* notification telling you what went wrong.
 
-s-compositor inverts the usual Smithay layering: **Slint owns rendering, output, input
-and the main event loop** (via its own `backend-winit` for nested development and
-`backend-linuxkms` for bare metal), while **Smithay is used purely as the Wayland
-protocol engine** — it manages clients, surfaces, buffers, `xdg-shell`,
-`wlr-layer-shell` and the seat, but does not present anything itself.
+> **Linker note:** linking needs the `libxkbcommon.so` *development* symlink, not
+> just the runtime `libxkbcommon.so.0`. If you see `error: unable to find library
+> -lxkbcommon`, install `libxkbcommon-dev` (above) or symlink it:
+> `sudo ln -s libxkbcommon.so.0 /usr/lib/x86_64-linux-gnu/libxkbcommon.so`.
 
-Client windows are imported into GL textures (owned by s-compositor, shared with the
-Skia renderer as borrowed textures) and shown as Slint `Image`s; the panel,
-taskbar and tray are ordinary Slint UI in the same scene. This keeps the whole
-desktop in one Slint scene graph.
+## What's implemented
 
-```
-┌──────────────── main thread (Slint) ─────────────────┐
-│  UI + GL + clock        rendering-notifier imports    │
-│  desktop.slint / panel   client buffers -> textures   │
-└───────────────▲───────────────────────┬──────────────┘
-        Event channel            calloop::channel (later)
-┌───────────────┴───────────────────────▼──────────────┐
-│  wayland thread (Smithay + calloop)                   │
-│  wl_compositor / xdg-shell / shm / seat / output      │
-└───────────────────────────────────────────────────────┘
-```
+Everything below works today.
 
-## Workspace layout
+**Windows**
+- Move by dragging the title bar — the compositor's, or the app's own for
+  client-side-decorated apps like Alacritty — plus resize (corner grip),
+  maximize and minimize.
+- **Server-side decorations** drawn by the compositor (title bar with
+  minimize/maximize/close, plus a border); client-side-decorated apps keep their
+  own title bar and transparent drop-shadow instead.
+- **Tiling / snapping**: snap to screen halves with `Super`+arrows or by dragging
+  a window to a screen edge.
+- **Always on top**: pin a window from its title-bar right-click menu.
+- **Four workspaces**, an **Alt-Tab** window switcher, and a **Show Desktop**
+  toggle.
 
-| Crate | Role |
-|-------|------|
-| `s-compositor` | Binary: wires the Slint UI + the Wayland thread together. |
-| `s-compositor-wayland` | Smithay protocol engine (no rendering). Unit-testable logic. |
-| `s-compositor-render` | GL buffer-import bridge (shm MVP, then dmabuf). |
-| `s-compositor-shell` | Plain-Rust data models (windows, workspaces, clock). |
-| `s-compositor-tray` | System tray (SNI) host — stub for now. |
+**Panel** (dockable to any screen edge, size configurable)
+- A live **clock** that stacks to two lines when the panel is narrow.
+- A **taskbar**, a **command launcher** (▶) and a **start menu** (⊞) with app
+  search and power actions (lock, suspend, restart, shut down, log out).
+- Status applets: **battery** (UPower), **CPU/memory monitor**, **volume**
+  (PulseAudio), **Wi-Fi** (NetworkManager: scan / connect / toggle), an optional
+  **keyboard-layout switcher**, and a playful **xeyes** applet.
+- A **system tray** (StatusNotifierItem host) and a **quick-settings** flyout.
 
-The Slint UI lives in `ui/` (`desktop.slint`, `panel.slint`, `clock.slint`,
-`eyes.slint`, `settings.slint`, `launcher.slint`, `file_dialog.slint`,
-`theme.slint`).
-
-## Status
-
-Working today (verified nested under Xvfb + llvmpipe):
-
-- Compositor advertises the core globals (`wl_compositor`, `xdg_shell`,
-  `wl_shm`, `wl_seat`, a virtual `wl_output`) on an auto-selected socket.
-- Client windows are composited into the Slint scene. Their `wl_shm` buffers
-  are uploaded into **GL textures we own and share with Slint's renderer** via
-  `BorrowedOpenGLTextureBuilder` (rendered with the **Skia** OpenGL renderer).
-  Frame callbacks are throttled to ~60Hz.
-- **Server-side decorations**: s-compositor forces `zxdg-decoration` ServerSide and
-  draws the title bar (title, minimize/maximize/close) and border itself.
-- **Input**: pointer and keyboard are forwarded to the focused client; windows
-  can be moved (server title-bar drag, or — for client-side-decorated apps like
-  Alacritty/weston-terminal — by dragging their own title bar, which drives an
-  interactive move), resized (corner grip), maximized and minimized. Client-side
-  decorations keep their transparent drop-shadow instead of a solid backdrop.
-- A panel dockable to any edge (configurable size) with a live clock that shows
-  `HH:MM` on one line when the panel is wide enough and stacks to two lines when
-  it is narrow, an **xeyes-style applet** whose pupils follow the pointer, a
-  **command launcher** (▶), a **taskbar**, and a **settings** button (⚙).
-- **Panel status applets**: a **battery** indicator (UPower), a **CPU/memory
-  system monitor**, an optional **keyboard-layout switcher** (click to cycle),
-  and a **Show Desktop** button that minimizes every window and restores them on
-  a second click.
-- **Start menu** (⊞): searchable app list plus power actions (run, lock,
-  suspend, restart, shut down, log out).
-- **Always on top**: pin a window from its title-bar right-click menu to keep it
-  stacked above the others.
-- **Theming**: accent colour and light/dark scheme, **persisted** to
-  `s-compositor.conf` in the working directory and **published over the XDG
-  `Settings` portal** (`org.freedesktop.appearance`) so apps follow it.
-- A reusable **file dialog** (editable path, keyboard navigation), also exposed
-  as an XDG **FileChooser portal** backend so other apps open files through it.
-- A **system tray**: an SNI (`StatusNotifierItem`) host, **Wi-Fi** (NetworkManager:
-  scan / connect with password / toggle) and **volume** (libpulse) in a
-  quick-settings flyout.
-- A **notification daemon** (`org.freedesktop.Notifications`) with on-screen
-  popups.
-- **XWayland**: X11 apps run via a rootless XWayland server with a built-in X11
-  window manager (shm clients; `DISPLAY` is set for launched apps).
+**Desktop & system**
+- **Notifications**: an `org.freedesktop.Notifications` daemon with on-screen
+  popups, a history, and Do-Not-Disturb.
+- **Theming**: accent colour and light/dark scheme, applied live, **saved** to
+  `s-compositor.conf`, and **published to apps** over the XDG appearance portal
+  so GTK/Qt apps follow your theme.
+- A **lock screen** (optional password) and a **screenshot** action
+  (`Super`+`p` → saved to `~/Pictures`).
 - **Configurable global keyboard shortcuts** (see below).
 
-Bare metal uses `backend-linuxkms`.
+**Apps & integration**
+- **`s-files`**, a bundled file manager with icon / list / details views,
+  navigation, multi-selection, copy / cut / paste, rename, trash, new folder,
+  drag-and-drop, a properties dialog, search and column sorting.
+- A reusable **file dialog**, also exposed as an XDG **FileChooser portal**
+  backend so other apps can open files through it (see below).
+- **XWayland**: X11 apps run via a rootless XWayland server with a built-in
+  window manager.
 
 ## Keyboard shortcuts
 
-Shortcuts are configured in `s-compositor.conf` as `bind = <combo> = <action>`,
-e.g.:
+Shortcuts live in `s-compositor.conf` (in the working directory) as
+`bind = <combo> = <action>`:
 
 ```
 bind = Super+Return = spawn:alacritty
 bind = Super+d = start-menu
+bind = Super+e = spawn:s-files
 bind = Super+q = close-window
 bind = Alt+Tab = next-window
 bind = Super+1 = workspace:1
@@ -161,29 +136,27 @@ bind = Super+Shift+1 = move-to-workspace:1
 bind = Super+Equal = volume-up
 ```
 
-To enable the panel's keyboard-layout switcher, list two or more xkb layouts in
-`s-compositor.conf` (the panel then shows the active layout's code; click it, or
-use the switcher, to cycle):
+Modifiers are `Super`/`Ctrl`/`Alt`/`Shift`; keys are letters, digits or names
+(`Return`, `Space`, `Tab`, `Escape`, `Minus`, `Equal`, `Comma`, `Period`).
+Available actions: `spawn:<cmd>`, `start-menu`, `launcher`, `settings`,
+`quick-settings`, `lock`, `logout`, `close-window`, `next-window`,
+`prev-window`, `workspace:<n>`, `move-to-workspace:<n>`, `workspace-next`,
+`workspace-prev`, `volume-up`, `volume-down`, `volume-mute`, `snap-left`,
+`snap-right`, `snap-up`, `snap-down`, `maximize`, `screenshot`.
+
+With no `bind` lines, sensible defaults apply (including `Super`+arrows to
+tile/maximize the focused window and `Super`+`p` to screenshot).
+
+To enable the keyboard-layout switcher, list two or more xkb layouts:
 
 ```
 keyboard_layouts = us,fr,de
 ```
 
-Modifiers are `Super`/`Ctrl`/`Alt`/`Shift`; keys are letters, digits or names
-(`Return`, `Space`, `Tab`, `Escape`, `Minus`, `Equal`, `Comma`, `Period`).
-Actions: `spawn:<cmd>`, `start-menu`, `launcher`, `settings`, `quick-settings`,
-`lock`, `logout`, `close-window`, `next-window`, `prev-window`, `workspace:<n>`,
-`move-to-workspace:<n>`, `workspace-next`, `workspace-prev`, `volume-up`,
-`volume-down`, `volume-mute`, `snap-left`, `snap-right`, `snap-up`, `snap-down`,
-`maximize`, `screenshot`. With no `bind` lines, sensible defaults are used
-(including `Super`+arrows to tile/maximize the focused window and `Super+p` to
-screenshot to `~/Pictures`).
-
 ## File chooser portal
 
-s-compositor implements `org.freedesktop.impl.portal.FileChooser`, so other
-applications can open files through its dialog. To route requests to it, install
-the backend declaration and configuration:
+`s-compositor` implements `org.freedesktop.impl.portal.FileChooser`, so other
+apps can open files through its dialog. To route requests to it:
 
 ```sh
 sudo install -Dm644 data/s-compositor.portal \
@@ -202,33 +175,62 @@ gdbus call --session --dest org.freedesktop.impl.portal.desktop.scompositor \
 # => (uint32 0, {'uris': <['file:///path/to/chosen']>})
 ```
 
-## Testing (for agents / CI)
+## For developers
 
-Two layers of verification work **without a display or GPU**:
+### How it works
 
-**1. Unit tests** — pure-logic models (windows, clock formatting, config):
+`s-compositor` inverts the usual Smithay layering: **Slint owns rendering,
+output, input and the main event loop** (via `backend-winit` when nested and
+`backend-linuxkms` on bare metal), while **Smithay is used purely as the Wayland
+protocol engine** — it manages clients, surfaces, buffers, `xdg-shell`,
+`wlr-layer-shell` and the seat, but presents nothing itself.
 
-```sh
-cargo test
+Client windows are imported into GL textures (owned by the compositor, shared
+with the Skia renderer as borrowed textures) and shown as Slint `Image`s; the
+panel, taskbar and tray are ordinary Slint UI in the same scene graph.
+
+```
+┌──────────────── main thread (Slint) ─────────────────┐
+│  UI + GL + clock        rendering-notifier imports    │
+│  desktop.slint / panel   client buffers -> textures   │
+└───────────────▲───────────────────────┬──────────────┘
+        Event channel            calloop::channel
+┌───────────────┴───────────────────────▼──────────────┐
+│  wayland thread (Smithay + calloop)                   │
+│  wl_compositor / xdg-shell / shm / seat / output      │
+└───────────────────────────────────────────────────────┘
 ```
 
-**2. Headless UI screenshots** — render the real Slint shell scene with the
-software renderer (no display, no GPU) and write PNGs you can inspect:
+### Project layout
+
+| Crate | Role |
+|-------|------|
+| `s-compositor` | The desktop binary: wires the Slint UI and the Wayland thread together. |
+| `s-compositor-wayland` | Smithay protocol engine (no rendering). Unit-testable logic. |
+| `s-compositor-render` | GL buffer-import bridge (shm, and experimental dmabuf). |
+| `s-compositor-shell` | Plain-Rust data models (windows, workspaces, clock). |
+| `s-compositor-tray` | System-tray (StatusNotifierItem) host. |
+| `s-files` | The standalone file-manager binary. |
+
+The Slint UI lives in `ui/`. Building `s-compositor` also builds `s-files` (the
+compositor's `build.rs` builds it and drops it next to the compositor binary),
+so a plain `cargo run` gives you a working file manager.
+
+### Testing (no display or GPU required)
+
+```sh
+cargo test            # unit tests + headless UI layout tests
+```
+
+The headless tests render the real Slint scenes with the software renderer. You
+can also write PNG snapshots to review the UI visually:
 
 ```sh
 cargo run -p s-compositor --example shell_screenshot
 ```
 
-This produces `shot_top_panel.png` (wide panel — clock on one line),
-`shot_right_panel.png` (narrow panel — clock stacked, eyes looking toward the
-pointer) and `shot_settings.png` (the Settings dialog). It is the quickest way to
-confirm a UI change visually after editing anything under `ui/`. The example lives
-in `crates/s-compositor/examples/shell_screenshot.rs`; add cases there (set
-properties, dispatch `WindowEvent`s, call `take_snapshot`) to cover new UI. The
-generated `shot_*.png` files are git-ignored.
-
-> The same `libxkbcommon` dev-symlink note from above applies: linking the
-> example (or any binary) needs `libxkbcommon.so`.
+This writes `shot_top_panel.png`, `shot_right_panel.png` and `shot_settings.png`
+(git-ignored) — the quickest way to confirm a UI change after editing `ui/`.
 
 ## License
 
