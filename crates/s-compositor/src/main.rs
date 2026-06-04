@@ -2526,6 +2526,31 @@ struct LaunchError {
     reason: String,
 }
 
+/// Check whether a *simple* command's program can be found, returning a reason
+/// ("command not found") if not. Commands with shell metacharacters (pipes,
+/// redirects, variables, …) are left to the shell, as are env-assignment and `~`
+/// prefixes, since we can't validate those without invoking the shell.
+fn command_program_missing(cmd: &str) -> Option<String> {
+    let shellish = cmd.contains([
+        '|', '&', ';', '<', '>', '$', '`', '(', ')', '{', '}', '*', '?', '\'', '"', '\n',
+    ]);
+    if shellish {
+        return None;
+    }
+    let prog = cmd.split_whitespace().next()?;
+    if prog.contains('=') || prog.starts_with('~') {
+        return None;
+    }
+    let found = if prog.contains('/') {
+        std::path::Path::new(prog).is_file()
+    } else {
+        std::env::var_os("PATH")
+            .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(prog).is_file()))
+            .unwrap_or(false)
+    };
+    (!found).then(|| "command not found".to_string())
+}
+
 /// Spawn a shell command detached, pointed at s-compositor's compositor. `wayland` is
 /// `(WAYLAND_DISPLAY, XDG_RUNTIME_DIR)` of s-compositor's own socket. A fast
 /// failure (missing binary, immediate crash) is reported on `fail_tx`.
@@ -2536,6 +2561,16 @@ fn spawn_command(
 ) {
     let cmd = cmd.trim();
     if cmd.is_empty() {
+        return;
+    }
+    // Fast path: report an obviously-missing program immediately, rather than
+    // waiting out the launch-watch grace period below.
+    if let Some(reason) = command_program_missing(cmd) {
+        log::warn!("not launching `{cmd}`: {reason}");
+        let _ = fail_tx.send(LaunchError {
+            cmd: cmd.to_string(),
+            reason,
+        });
         return;
     }
 
@@ -2614,7 +2649,22 @@ fn spawn_command(
 
 #[cfg(test)]
 mod tests {
-    use super::{evdev_button, evdev_keycode};
+    use super::{command_program_missing, evdev_button, evdev_keycode};
+
+    #[test]
+    fn reports_missing_commands() {
+        // Nonexistent program (bare name) and nonexistent path are reported.
+        assert!(command_program_missing("definitely-not-a-real-binary-xyz").is_some());
+        assert!(command_program_missing("/no/such/file-xyz").is_some());
+        // Existing program (by path, and on PATH with args) is accepted.
+        assert!(command_program_missing("/bin/sh").is_none());
+        assert!(command_program_missing("sh -c true").is_none());
+        // Shell-y / special commands are left to the shell, not pre-checked.
+        assert!(command_program_missing("foo | bar").is_none());
+        assert!(command_program_missing("echo $HOME").is_none());
+        assert!(command_program_missing("~/bin/thing").is_none());
+        assert!(command_program_missing("").is_none());
+    }
 
     #[test]
     fn keycode_letters() {
