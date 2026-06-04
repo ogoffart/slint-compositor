@@ -2582,6 +2582,24 @@ mod shot {
             vec![out(0., 0., 1280., 800.)]
         }))));
 
+        if multi {
+            // Windows spread across both outputs, to check per-output taskbars.
+            let win = |title: &str, x: f32| WindowTile {
+                title: title.into(),
+                x,
+                y: 220.0,
+                width: 360.0,
+                height: 260.0,
+                workspace: 0,
+                ..Default::default()
+            };
+            d.set_windows(ModelRc::from(Rc::new(VecModel::from(vec![
+                win("Editor (left)", 300.0),
+                win("Browser (right)", 1620.0),
+                win("Terminal (left)", 520.0),
+            ]))));
+        }
+
         if std::env::var("SCOMP_SHOT_SETTINGS").is_ok() {
             d.set_settings_visible(true);
             d.set_settings_tab(1);

@@ -328,6 +328,11 @@ export component Panel inherits Rectangle {
     in property <bool> horizontal;
     in property <int> edge;   // 0=Right 1=Left 2=Top 3=Bottom (for tooltip placement)
     in property <[WindowTile]> windows;
+    // This panel's output region; the taskbar only lists windows centred on it.
+    in property <length> out-x;
+    in property <length> out-y;
+    in property <length> out-w: 100000px;
+    in property <length> out-h: 100000px;
     in property <string> clock-hours;
     in property <string> clock-minutes;
     in property <length> cursor-x;
@@ -443,7 +448,11 @@ export component Panel inherits Rectangle {
             alignment: start;
             for win in root.windows: TaskItem {
                 tile: win;
-                height: 40px;
+                visible: win.x + win.width / 2 >= root.out-x
+                    && win.x + win.width / 2 < root.out-x + root.out-w
+                    && win.y + win.height / 2 >= root.out-y
+                    && win.y + win.height / 2 < root.out-y + root.out-h;
+                height: self.visible ? 40px : 0px;
                 activate => { root.activate(win.id); }
             }
         }
@@ -534,7 +543,11 @@ export component Panel inherits Rectangle {
             alignment: start;
             for win in root.windows: TaskItem {
                 tile: win;
-                width: 110px;
+                visible: win.x + win.width / 2 >= root.out-x
+                    && win.x + win.width / 2 < root.out-x + root.out-w
+                    && win.y + win.height / 2 >= root.out-y
+                    && win.y + win.height / 2 < root.out-y + root.out-h;
+                width: self.visible ? 110px : 0px;
                 activate => { root.activate(win.id); }
             }
         }
