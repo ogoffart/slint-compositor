@@ -64,11 +64,29 @@ struct Windows {
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // Make any thread's panic fatal and loud. The compositor runs across several
+    // threads (Wayland engine, tray, network…); a panic on one of them would
+    // otherwise just kill that thread and leave a half-dead shell limping along
+    // (e.g. a dead Wayland thread → "no windows show"). Print the panic, then
+    // abort the whole process so it can't go unnoticed.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        let thread = std::thread::current();
+        log::error!(
+            "fatal: thread '{}' panicked — aborting the compositor",
+            thread.name().unwrap_or("<unnamed>")
+        );
+        std::process::abort();
+    }));
+
     // `system-tray` turns on zbus's `tokio` feature for the whole binary, so the
     // zbus calls made on this (Slint main) thread — notably Slint's winit backend
     // watching the XDG colour scheme — route through `tokio::spawn_blocking` and
     // panic without a Tokio runtime in scope. Enter one for the program's life.
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     let _runtime_guard = runtime.enter();
 
     // Load persisted settings from the working directory.
@@ -82,9 +100,14 @@ fn main() -> anyhow::Result<()> {
     std::thread::Builder::new()
         .name("s-compositor-wayland".into())
         .spawn(move || {
-            if let Err(err) = s_compositor_wayland::run(tx, cmd_rx, kb_layouts) {
-                log::error!("wayland thread exited: {err:?}");
+            match s_compositor_wayland::run(tx, cmd_rx, kb_layouts) {
+                Ok(()) => log::error!("wayland event loop ended unexpectedly"),
+                Err(err) => log::error!("wayland thread exited: {err:?}"),
             }
+            // The shell is useless without its Wayland engine: a panic aborts via
+            // the hook above; a clean/error return lands here. Either way, bring
+            // the whole process down instead of leaving a zombie UI.
+            std::process::exit(1);
         })?;
 
     let desktop = Desktop::new()?;

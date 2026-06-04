@@ -108,7 +108,9 @@ impl GlBridge {
                     }
                 });
             } else {
-                log::info!("dmabuf: EGL image-import functions unavailable; GPU buffers unsupported");
+                log::info!(
+                    "dmabuf: EGL image-import functions unavailable; GPU buffers unsupported"
+                );
             }
         }
     }
@@ -233,8 +235,16 @@ impl GlBridge {
                 None => gl.create_texture().ok()?,
             };
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::LINEAR as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::LINEAR as i32,
+            );
             gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_WRAP_S,
