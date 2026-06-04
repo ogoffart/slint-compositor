@@ -134,7 +134,8 @@ impl CompositorHandler for SlickState {
                     let state = guard.current();
                     (state.anchor, state.margin)
                 });
-                let (x, y) = layer_position(anchor, margin, width as i32, height as i32);
+                let (x, y) =
+                    layer_position(self.current_output_size, anchor, margin, width as i32, height as i32);
                 let _ = self.events.send(Event::LayerBuffer {
                     id,
                     layer: layer_to_u8(layer),
@@ -297,18 +298,71 @@ fn layer_to_u8(layer: Layer) -> u8 {
 }
 
 /// Position a layer surface against the output edges per its anchors+margins.
-fn layer_position(anchor: Anchor, margin: Margins, w: i32, h: i32) -> (i32, i32) {
+/// `(out_w, out_h)` is the current output size in logical pixels.
+fn layer_position(
+    (out_w, out_h): (i32, i32),
+    anchor: Anchor,
+    margin: Margins,
+    w: i32,
+    h: i32,
+) -> (i32, i32) {
     let x = if anchor.contains(Anchor::RIGHT) && !anchor.contains(Anchor::LEFT) {
-        crate::OUTPUT_W - w - margin.right
+        out_w - w - margin.right
     } else {
         margin.left
     };
     let y = if anchor.contains(Anchor::BOTTOM) && !anchor.contains(Anchor::TOP) {
-        crate::OUTPUT_H - h - margin.bottom
+        out_h - h - margin.bottom
     } else {
         margin.top
     };
     (x, y)
+}
+
+impl SlickState {
+    /// Resize the primary output to `width`x`height` (logical px). Updates the
+    /// advertised `wl_output` mode so clients learn the new screen size, and
+    /// re-fills layer surfaces that span the output (e.g. bars, wallpapers).
+    pub fn resize_output(&mut self, width: i32, height: i32) {
+        let size = (width.max(1), height.max(1));
+        if self.current_output_size == size {
+            return;
+        }
+        self.current_output_size = size;
+
+        let mode = smithay::output::Mode {
+            size: size.into(),
+            refresh: 60_000,
+        };
+        self.output.change_current_state(Some(mode), None, None, None);
+        self.output.set_preferred(mode);
+
+        // Re-configure layer surfaces that asked to span the output (a 0 in a
+        // dimension means "fill"), so bars/wallpapers track the new size.
+        let surfaces: Vec<LayerSurface> = self
+            .layer_surfaces
+            .values()
+            .map(|e| e.surface.clone())
+            .collect();
+        for surface in surfaces {
+            let desired = with_states(surface.wl_surface(), |states| {
+                states
+                    .cached_state
+                    .get::<LayerSurfaceCachedState>()
+                    .current()
+                    .size
+            });
+            if desired.w > 0 && desired.h > 0 {
+                continue;
+            }
+            let w = if desired.w > 0 { desired.w } else { size.0 };
+            let h = if desired.h > 0 { desired.h } else { size.1 };
+            surface.with_pending_state(|state| {
+                state.size = Some((w, h).into());
+            });
+            surface.send_configure();
+        }
+    }
 }
 
 /// Read the toplevel title from a surface's xdg state.
@@ -618,16 +672,9 @@ impl WlrLayerShellHandler for SlickState {
                 .current()
                 .size
         });
-        let w = if desired.w > 0 {
-            desired.w
-        } else {
-            crate::OUTPUT_W
-        };
-        let h = if desired.h > 0 {
-            desired.h
-        } else {
-            crate::OUTPUT_H
-        };
+        let (out_w, out_h) = self.current_output_size;
+        let w = if desired.w > 0 { desired.w } else { out_w };
+        let h = if desired.h > 0 { desired.h } else { out_h };
         surface.with_pending_state(|state| {
             state.size = Some((w, h).into());
         });

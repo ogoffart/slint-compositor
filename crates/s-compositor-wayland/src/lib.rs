@@ -213,6 +213,13 @@ pub enum Command {
         width: i32,
         height: i32,
     },
+    /// The screen (primary output) was resized — e.g. the host window was
+    /// resized when running nested. Updates the advertised `wl_output` mode and
+    /// re-fills layer surfaces that span the output.
+    ResizeOutput {
+        width: i32,
+        height: i32,
+    },
     /// Dismiss all open popups (e.g. a click landed outside them).
     DismissPopups,
     /// Advance to the next configured keyboard layout (panel layout switcher).
@@ -421,6 +428,7 @@ pub fn run(
         primary_selection_state,
         seat,
         output,
+        current_output_size: (layout[0].w, layout[0].h),
         outputs,
         dmabuf_state,
         dmabuf_global: None,

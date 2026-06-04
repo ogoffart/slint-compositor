@@ -45,6 +45,9 @@ pub struct SlickState {
     pub output: Output,
     /// All advertised outputs (kept alive so their `wl_output` globals persist).
     pub outputs: Vec<Output>,
+    /// Current size (logical px) of the primary output. Tracks the host window
+    /// when nested, so layer surfaces anchor to (and fill) the live screen size.
+    pub current_output_size: (i32, i32),
     /// dmabuf (GPU buffer) protocol state; the global is only created when the
     /// experimental `S_COMPOSITOR_DMABUF` env var is set.
     pub dmabuf_state: smithay::wayland::dmabuf::DmabufState,

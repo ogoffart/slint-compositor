@@ -1067,6 +1067,11 @@ fn main() -> anyhow::Result<()> {
         let switcher_until = switcher_until.clone();
         let kb_layout_codes = kb_layout_codes.clone();
         let mut battery_low_warned = false;
+        // When a single output is advertised (the common nested/X11 case) the
+        // output tracks the host window size; remember the last applied logical
+        // size and whether we're in that single-output mode.
+        let mut single_output = true;
+        let mut last_screen: Option<(f32, f32)> = None;
         move || {
             let mut dirty = false;
 
@@ -1185,6 +1190,11 @@ fn main() -> anyhow::Result<()> {
                         outputs.len()
                     );
                     *wayland_env.borrow_mut() = Some((socket_name.clone(), runtime_dir.clone()));
+                    // A single advertised output follows the host window size
+                    // (resize the window = resize the screen). A multi-monitor
+                    // layout is fixed, so leave it as configured.
+                    single_output = outputs.len() <= 1;
+                    last_screen = None;
                     let bw = outputs
                         .iter()
                         .map(|o| o.x + o.w)
@@ -1248,6 +1258,36 @@ fn main() -> anyhow::Result<()> {
                     active_ws,
                 );
             }
+            // Follow the host window size: when a single output is advertised,
+            // resizing the window (e.g. on X11) resizes the screen so the
+            // desktop fills it, and maximized windows re-fit the new work area.
+            if single_output {
+                if let Some(d) = weak.upgrade() {
+                    let scale = d.window().scale_factor().max(0.01);
+                    let size = d.window().size();
+                    let lw = (size.width as f32 / scale).round();
+                    let lh = (size.height as f32 / scale).round();
+                    if lw >= 1.0 && lh >= 1.0 && last_screen != Some((lw, lh)) {
+                        last_screen = Some((lw, lh));
+                        outputs_model.set_row_data(
+                            0,
+                            OutputRect {
+                                x: 0.0,
+                                y: 0.0,
+                                width: lw,
+                                height: lh,
+                            },
+                        );
+                        let _ = cmd_tx.send(s_compositor_wayland::Command::ResizeOutput {
+                            width: lw as i32,
+                            height: lh as i32,
+                        });
+                        refit_maximized(&d, &model, &cmd_tx);
+                        dirty = true;
+                    }
+                }
+            }
+
             // Drive window open/close animations (clear `appearing`, remove
             // windows whose fade-out has finished).
             if process_window_anims(&model, &windows) {
@@ -2016,6 +2056,35 @@ fn set_maximized(
         height: tile.height as i32,
     });
     model.set_row_data(row, tile);
+}
+
+/// Re-fit every maximized window to the current work area. Used after the
+/// screen/output is resized so maximized windows keep filling it.
+fn refit_maximized(
+    d: &Desktop,
+    model: &Rc<VecModel<WindowTile>>,
+    cmd_tx: &s_compositor_wayland::CommandSender<s_compositor_wayland::Command>,
+) {
+    for row in 0..model.row_count() {
+        let Some(mut tile) = model.row_data(row) else {
+            continue;
+        };
+        if !tile.maximized {
+            continue;
+        }
+        let (x, y, w, h) = work_area(d, tile.x + tile.width / 2.0, tile.y + tile.height / 2.0);
+        let titlebar = if tile.decorated { 28.0 } else { 0.0 };
+        tile.x = x;
+        tile.y = y;
+        tile.width = w;
+        tile.height = (h - titlebar).max(1.0);
+        let _ = cmd_tx.send(s_compositor_wayland::Command::ResizeWindow {
+            id: s_compositor_wayland::WindowId(tile.id as u64),
+            width: tile.width as i32,
+            height: tile.height as i32,
+        });
+        model.set_row_data(row, tile);
+    }
 }
 
 /// Apply one SNI tray update to the model. `Add` upserts; `Remove` drops the row.

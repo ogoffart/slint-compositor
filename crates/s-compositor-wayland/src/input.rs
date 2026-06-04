@@ -31,6 +31,7 @@ impl SlickState {
             Command::PointerAxis { id, dx, dy } => self.pointer_axis(id, dx, dy),
             Command::Key { keycode, pressed } => self.key_input(keycode, pressed),
             Command::ResizeWindow { id, width, height } => self.resize_window(id, width, height),
+            Command::ResizeOutput { width, height } => self.resize_output(width, height),
             Command::DismissPopups => {
                 for entry in self.popups.values() {
                     entry.popup.send_popup_done();
