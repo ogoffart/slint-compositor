@@ -39,10 +39,12 @@ export component WindowMenu inherits Rectangle {
     in property <length> menu-x;
     in property <length> menu-y;
     in property <bool> maximized;
+    in property <bool> pinned;
     in property <int> workspace-count;
     in property <int> current-workspace;
     callback minimize();
     callback toggle-maximize();
+    callback toggle-pinned();
     callback close();
     callback move-to-workspace(int);
     callback dismiss();
@@ -80,6 +82,13 @@ export component WindowMenu inherits Rectangle {
                 label: root.maximized ? "Restore" : "Maximize";
                 clicked => {
                     root.toggle-maximize();
+                }
+            }
+            MenuItem {
+                icon: root.pinned ? "📌" : "📍";
+                label: root.pinned ? "Unpin (always on top)" : "Always on top";
+                clicked => {
+                    root.toggle-pinned();
                 }
             }
             MenuItem {

@@ -158,6 +158,26 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Start menu: a searchable view over the same configured app list.
+    let start_menu_model = Rc::new(VecModel::<MenuEntry>::default());
+    desktop.set_start_menu_entries(ModelRc::from(start_menu_model.clone()));
+    desktop.on_start_menu_query({
+        let menu_model = menu_model.clone();
+        let start_menu_model = start_menu_model.clone();
+        move |query| {
+            let q = query.to_lowercase();
+            let results: Vec<MenuEntry> = menu_model
+                .iter()
+                .filter(|a| {
+                    q.is_empty()
+                        || a.name.to_lowercase().contains(&q)
+                        || a.command.to_lowercase().contains(&q)
+                })
+                .collect();
+            start_menu_model.set_vec(results);
+        }
+    });
+
     // Lock-screen password (empty = unlock on Enter).
     let lock_password: Rc<RefCell<String>> = Rc::new(RefCell::new(loaded.lock_password.clone()));
     desktop.set_lock_has_password(!lock_password.borrow().is_empty());
@@ -462,6 +482,23 @@ fn main() -> anyhow::Result<()> {
             if let Some(maxd) = currently {
                 set_maximized(&d, &model, &windows, &cmd_tx, id as u64, !maxd);
             }
+        }
+    });
+
+    // Always-on-top: toggle a window's pinned flag, then keep pinned windows
+    // stacked above all others.
+    desktop.on_toggle_window_pinned({
+        let model = model.clone();
+        let windows = windows.clone();
+        move |id| {
+            let row = windows.borrow().rows.get(&(id as u64)).copied();
+            if let Some(row) = row {
+                if let Some(mut tile) = model.row_data(row) {
+                    tile.pinned = !tile.pinned;
+                    model.set_row_data(row, tile);
+                }
+            }
+            enforce_pinned_order(&model, &windows);
         }
     });
 
@@ -1165,6 +1202,7 @@ fn handle_event(
                     focused: false,
                     minimized: false,
                     maximized: false,
+                    pinned: false,
                     appearing: true,
                     closing: false,
                     workspace: active_workspace,
@@ -1382,28 +1420,55 @@ fn move_focused_to_workspace(
 }
 
 fn raise_and_focus(model: &Rc<VecModel<WindowTile>>, windows: &Rc<RefCell<Windows>>, id: u64) {
-    let mut w = windows.borrow_mut();
-    w.focused = Some(id);
-    if let Some(&row) = w.rows.get(&id) {
-        if row + 1 != model.row_count() {
-            if let Some(tile) = model.row_data(row) {
-                model.remove(row);
-                model.push(tile);
+    {
+        let mut w = windows.borrow_mut();
+        w.focused = Some(id);
+        if let Some(&row) = w.rows.get(&id) {
+            if row + 1 != model.row_count() {
+                if let Some(tile) = model.row_data(row) {
+                    model.remove(row);
+                    model.push(tile);
+                }
+            }
+        }
+        for i in 0..model.row_count() {
+            if let Some(mut tile) = model.row_data(i) {
+                w.rows.insert(tile.id as u64, i);
+                let want = tile.id as u64 == id;
+                let unminimize = want && tile.minimized;
+                if tile.focused != want || unminimize {
+                    tile.focused = want;
+                    if unminimize {
+                        tile.minimized = false;
+                    }
+                    model.set_row_data(i, tile);
+                }
             }
         }
     }
+    // Keep always-on-top windows above the window we just raised.
+    enforce_pinned_order(model, windows);
+}
+
+/// Keep pinned (always-on-top) windows above all non-pinned ones. The model is
+/// painted in order, so the topmost window is last; pinned windows are moved to
+/// the tail, preserving relative order within each group.
+fn enforce_pinned_order(model: &Rc<VecModel<WindowTile>>, windows: &Rc<RefCell<Windows>>) {
+    let n = model.row_count();
+    let tiles: Vec<WindowTile> = (0..n).filter_map(|i| model.row_data(i)).collect();
+    if tiles.len() != n || !tiles.iter().any(|t| t.pinned) {
+        return;
+    }
+    let mut ordered: Vec<WindowTile> = tiles.iter().filter(|t| !t.pinned).cloned().collect();
+    ordered.extend(tiles.iter().filter(|t| t.pinned).cloned());
+    if ordered.iter().zip(tiles.iter()).all(|(a, b)| a.id == b.id) {
+        return; // already in order
+    }
+    model.set_vec(ordered);
+    let mut w = windows.borrow_mut();
     for i in 0..model.row_count() {
-        if let Some(mut tile) = model.row_data(i) {
-            w.rows.insert(tile.id as u64, i);
-            let want = tile.id as u64 == id;
-            let unminimize = want && tile.minimized;
-            if tile.focused != want || unminimize {
-                tile.focused = want;
-                if unminimize {
-                    tile.minimized = false;
-                }
-                model.set_row_data(i, tile);
-            }
+        if let Some(t) = model.row_data(i) {
+            w.rows.insert(t.id as u64, i);
         }
     }
 }

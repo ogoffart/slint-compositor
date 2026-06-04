@@ -107,6 +107,7 @@ fn main() {
             icon: solid_icon(0x89, 0xb4, 0xfa),
             decorated: true,
             focused: true,
+            pinned: true,
             x: 220.0,
             y: 140.0,
             width: 480.0,
@@ -223,7 +224,8 @@ fn main() {
             kind: "app".into(),
         },
     ]));
-    ui.set_menu_entries(menu.into());
+    ui.set_menu_entries(menu.clone().into());
+    ui.set_start_menu_entries(menu.into());
     ui.set_start_menu_visible(true);
     save(
         &ui,

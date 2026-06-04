@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { LineEdit } from "std-widgets.slint";
 import { MenuEntry } from "types.slint";
 
 // A row in the start menu.
@@ -43,6 +44,7 @@ component MenuRow inherits Rectangle {
 // to the bottom-left; click the backdrop or press Escape to dismiss.
 export component StartMenu inherits Rectangle {
     in property <[MenuEntry]> entries;
+    callback query-changed(string);
     callback launch(string);
     callback run();
     callback lock();
@@ -73,9 +75,29 @@ export component StartMenu inherits Rectangle {
         // Swallow clicks so they don't reach the dismiss backdrop.
         TouchArea {}
 
+        init => {
+            search.focus();
+            root.query-changed("");
+        }
+
         menu := VerticalLayout {
             padding: 12px;
             spacing: 2px;
+
+            search := LineEdit {
+                font-size: 14px;
+                placeholder-text: "Search apps…";
+                edited(text) => {
+                    root.query-changed(text);
+                }
+                accepted(text) => {
+                    if root.entries.length > 0 {
+                        root.launch(root.entries[0].command);
+                    } else if text != "" {
+                        root.launch(text);
+                    }
+                }
+            }
 
             Text {
                 text: "Applications";

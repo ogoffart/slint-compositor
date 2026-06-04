@@ -118,6 +118,11 @@ component WindowFrame inherits Rectangle {
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
+                if tile.pinned: Text {
+                    text: "📌";
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
 
                 Rectangle {
                     width: 22px;
@@ -321,6 +326,7 @@ export component Desktop inherits Window {
     in-out property <length> window-menu-y;
     in-out property <int> window-menu-id;
     in-out property <bool> window-menu-maximized;
+    in-out property <bool> window-menu-pinned;
     in-out property <bool> settings-visible: false;
     in-out property <bool> start-menu-visible: false;
     in-out property <bool> quick-settings-visible: false;
@@ -363,6 +369,9 @@ export component Desktop inherits Window {
 
     // Start menu + lock screen.
     in property <[MenuEntry]> menu-entries;
+    // Start-menu search results (host-filtered subset of menu-entries).
+    in property <[MenuEntry]> start-menu-entries;
+    callback start-menu-query(string);
     in-out property <bool> locked: false;
     in property <bool> lock-has-password;
     in-out property <bool> lock-wrong: false;
@@ -388,6 +397,7 @@ export component Desktop inherits Window {
     callback close-window(int);
     callback minimize-window(int);
     callback toggle-maximize-window(int);
+    callback toggle-window-pinned(int);                  // always-on-top toggle
     callback activate-window(int);                       // taskbar / raise + focus
     callback move-window(int, length, length);
     callback drop-window(int, length, length);   // window dropped at cursor (x,y)
@@ -550,6 +560,7 @@ export component Desktop inherits Window {
         menu-requested(cx, cy) => {
             root.window-menu-id = win.id;
             root.window-menu-maximized = win.maximized;
+            root.window-menu-pinned = win.pinned;
             root.window-menu-x = cx;
             root.window-menu-y = cy;
             root.window-menu-visible = true;
@@ -785,6 +796,7 @@ export component Desktop inherits Window {
         menu-x: root.window-menu-x;
         menu-y: root.window-menu-y;
         maximized: root.window-menu-maximized;
+        pinned: root.window-menu-pinned;
         workspace-count: root.workspace-count;
         current-workspace: root.active-workspace;
         minimize => {
@@ -794,6 +806,10 @@ export component Desktop inherits Window {
         toggle-maximize => {
             root.window-menu-visible = false;
             root.toggle-maximize-window(root.window-menu-id);
+        }
+        toggle-pinned => {
+            root.window-menu-visible = false;
+            root.toggle-window-pinned(root.window-menu-id);
         }
         close => {
             root.window-menu-visible = false;
@@ -813,7 +829,10 @@ export component Desktop inherits Window {
         y: 0;
         width: parent.width;
         height: parent.height;
-        entries: root.menu-entries;
+        entries: root.start-menu-entries;
+        query-changed(q) => {
+            root.start-menu-query(q);
+        }
         launch(cmd) => {
             root.launch(cmd);
             root.start-menu-visible = false;

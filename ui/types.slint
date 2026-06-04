@@ -106,6 +106,8 @@ export struct WindowTile {
     focused: bool,
     minimized: bool,
     maximized: bool,
+    // Whether the window is kept above other (non-pinned) windows.
+    pinned: bool,
     // Briefly true right after the window opens (drives the open animation).
     appearing: bool,
     // True while the window is fading out before removal (close animation).
