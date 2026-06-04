@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
     // zbus calls made on this (Slint main) thread — notably Slint's winit backend
     // watching the XDG colour scheme — route through `tokio::spawn_blocking` and
     // panic without a Tokio runtime in scope. Enter one for the program's life.
-    let runtime = tokio::runtime::Builder::new_multi_thread().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let _runtime_guard = runtime.enter();
 
     // Spawn the Wayland compositor on its own thread.
