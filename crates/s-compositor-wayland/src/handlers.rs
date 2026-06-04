@@ -54,6 +54,12 @@ impl CompositorHandler for SlickState {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        // XWayland's client is created by smithay with its own data type, not our
+        // ClientState; handle both so the compositor doesn't panic when X11 apps
+        // (via XWayland) connect.
+        if let Some(state) = client.get_data::<smithay::xwayland::XWaylandClientData>() {
+            return &state.compositor_state;
+        }
         &client
             .get_data::<ClientState>()
             .expect("client missing ClientState")

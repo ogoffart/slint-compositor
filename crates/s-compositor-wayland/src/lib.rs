@@ -477,11 +477,12 @@ pub fn run(
             Generic::new(socket, Interest::READ, Mode::Level),
             move |_, socket, state: &mut SlickState| {
                 while let Some(stream) = socket.accept()? {
-                    if let Err(err) = state
+                    match state
                         .display_handle
                         .insert_client(stream, state::ClientState::arc())
                     {
-                        log::warn!("failed to accept client: {err}");
+                        Ok(_) => log::info!("wayland: client connected"),
+                        Err(err) => log::warn!("failed to accept client: {err}"),
                     }
                 }
                 Ok::<_, std::io::Error>(PostAction::Continue)

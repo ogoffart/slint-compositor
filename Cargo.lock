@@ -4077,10 +4077,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "calloop 0.14.4",
+ "env_logger",
  "log",
  "s-compositor-render",
  "s-compositor-shell",
  "smithay",
+ "wayland-client",
 ]
 
 [[package]]

@@ -22,7 +22,13 @@ use crate::state::{SlickState, X11Entry};
 use crate::Event;
 
 /// Spawn XWayland and wire its readiness into the event loop. Best-effort.
+/// Set `S_COMPOSITOR_NO_XWAYLAND` to skip it entirely (useful to isolate
+/// XWayland-related problems).
 pub fn setup(handle: &LoopHandle<'static, SlickState>, dh: &DisplayHandle) {
+    if std::env::var_os("S_COMPOSITOR_NO_XWAYLAND").is_some() {
+        log::info!("xwayland: disabled via S_COMPOSITOR_NO_XWAYLAND");
+        return;
+    }
     let (xwayland, client) = match XWayland::spawn(
         dh,
         None,
