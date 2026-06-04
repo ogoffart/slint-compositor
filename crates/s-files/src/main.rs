@@ -120,40 +120,123 @@ fn main() -> Result<(), slint::PlatformError> {
 }
 
 #[cfg(test)]
-mod screenshot {
-    //! Render the browser headlessly with Slint's software renderer and write a
-    //! PNG, so the dialog's appearance can be reviewed without a display server.
+mod ui {
+    //! Headless UI tests driven by Slint's software renderer (no display server).
     //!
-    //! (Slint's *testing* backend cannot do this in 1.16: its renderer only does
-    //! layout, font metrics and element queries — `Window::take_snapshot()`
-    //! returns "not implemented by the platform". The software renderer is the
-    //! supported headless rasteriser.)
+    //! Two things use this: `render_to_png` writes a PNG so the browser's
+    //! appearance can be reviewed, and `main_view_scrolls` checks that the file
+    //! list actually overflows its viewport (i.e. can scroll).
+    //!
+    //! (Slint's *testing* backend cannot rasterise in 1.16: its renderer only
+    //! does layout, font metrics and element queries — `take_snapshot()` returns
+    //! "not implemented by the platform". The software renderer is the supported
+    //! headless rasteriser, and it performs the layout these tests rely on.)
     use super::*;
     use slint::platform::software_renderer::{
         MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType,
     };
     use slint::platform::{Platform, WindowAdapter};
+    use std::cell::Cell;
+    use std::sync::Mutex;
 
-    struct SwPlatform {
-        window: Rc<MinimalSoftwareWindow>,
+    thread_local! {
+        // Windows the platform hands out, newest last, per (test) thread.
+        static WINDOWS: RefCell<Vec<Rc<MinimalSoftwareWindow>>> = const { RefCell::new(Vec::new()) };
     }
 
+    // A platform that creates a fresh software window per component, so several
+    // tests can each drive their own window through one process-wide platform.
+    struct SwPlatform;
     impl Platform for SwPlatform {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
-            Ok(self.window.clone())
+            let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+            WINDOWS.with(|ws| ws.borrow_mut().push(window.clone()));
+            Ok(window)
+        }
+    }
+
+    // Slint's platform is installed per thread, and libtest runs each test on
+    // its own thread; install `SwPlatform` once per thread. The lock just keeps
+    // the window-driving tests from running concurrently.
+    static UI_LOCK: Mutex<()> = Mutex::new(());
+
+    fn ensure_platform() {
+        thread_local! {
+            static INSTALLED: Cell<bool> = const { Cell::new(false) };
+        }
+        INSTALLED.with(|installed| {
+            if !installed.replace(true) {
+                let _ = slint::platform::set_platform(Box::new(SwPlatform));
+            }
+        });
+    }
+
+    /// Create a `Files` component and return it alongside its software window.
+    fn new_files() -> (Files, Rc<MinimalSoftwareWindow>) {
+        ensure_platform();
+        let files = Files::new().unwrap();
+        let window = WINDOWS.with(|ws| ws.borrow().last().expect("window created").clone());
+        (files, window)
+    }
+
+    /// Size the window, render one frame, and return the premultiplied buffer.
+    fn draw(window: &Rc<MinimalSoftwareWindow>, w: u32, h: u32) -> Vec<PremultipliedRgbaColor> {
+        window.set_size(slint::PhysicalSize::new(w, h));
+        let mut buffer = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
+        let drawn = window.draw_if_needed(|renderer| {
+            renderer.render(&mut buffer, w as usize);
+        });
+        assert!(drawn, "software renderer reported nothing to draw");
+        buffer
+    }
+
+    /// Filling the list with far more items than fit must make the scroll
+    /// viewport overflow the visible area in every view, so the view can scroll.
+    /// (Regression test: wrapping each view in an `if` left the ScrollView with
+    /// only conditional children, so its viewport collapsed to the visible size.)
+    #[test]
+    fn main_view_scrolls() {
+        let _guard = UI_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (files, window) = new_files();
+
+        let items = Rc::new(VecModel::<FileItem>::default());
+        files.set_items(items.clone().into());
+        items.set_vec(
+            (0..200)
+                .map(|i| FileItem {
+                    name: format!("item-{i}").into(),
+                    ..Default::default()
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        let (w, h) = (900u32, 600u32);
+        for view in [0, 1, 2] {
+            files.set_view(view);
+            files.show().unwrap();
+            files.window().request_redraw();
+            draw(&window, w, h);
+
+            let visible = files.get_scroll_visible_height();
+            let viewport = files.get_scroll_viewport_height();
+            assert!(
+                visible > 0.0,
+                "view {view}: visible height should be laid out, got {visible}"
+            );
+            assert!(
+                viewport > visible + 1.0,
+                "view {view}: scroll viewport ({viewport}) should overflow the \
+                 visible area ({visible}) so the list can scroll",
+            );
+            files.hide().unwrap();
         }
     }
 
     #[test]
     fn render_to_png() {
+        let _guard = UI_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let (w, h) = (920u32, 600u32);
-        let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
-        // `set_platform` must run before any component is created. This is the
-        // only window-creating test in the crate, so the global install is safe.
-        slint::platform::set_platform(Box::new(SwPlatform {
-            window: window.clone(),
-        }))
-        .expect("install software platform");
+        let (files, window) = new_files();
         window.set_size(slint::PhysicalSize::new(w, h));
 
         let dir = std::env::var("SFILES_SHOT_DIR").unwrap_or_else(|_| "/tmp/sfiles-sample".into());
@@ -165,7 +248,6 @@ mod screenshot {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
-        let files = Files::new().unwrap();
         let items = Rc::new(VecModel::<FileItem>::default());
         files.set_items(items.clone().into());
         // A few sidebar entries so the screenshot shows the Places panel.
@@ -216,11 +298,7 @@ mod screenshot {
         files.show().unwrap();
         files.window().request_redraw();
 
-        let mut buffer = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
-        let drawn = window.draw_if_needed(|renderer| {
-            renderer.render(&mut buffer, w as usize);
-        });
-        assert!(drawn, "software renderer reported nothing to draw");
+        let buffer = draw(&window, w, h);
 
         // Un-premultiply into straight RGBA8 for PNG encoding.
         let mut rgba = Vec::with_capacity(buffer.len() * 4);

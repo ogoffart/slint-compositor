@@ -220,6 +220,11 @@ export component Files inherits Window {
     // When true, the breadcrumb is replaced by an editable path field.
     property <bool> editing-path;
 
+    // Observable scroll geometry (used by headless layout tests to confirm the
+    // content viewport overflows the visible area, i.e. the view can scroll).
+    out property <length> scroll-viewport-height: scroll.viewport-height;
+    out property <length> scroll-visible-height: scroll.visible-height;
+
     // Properties dialog (populated from Rust).
     in-out property <bool> prop-visible;
     in property <string> prop-name;
