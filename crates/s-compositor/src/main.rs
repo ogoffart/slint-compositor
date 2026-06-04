@@ -246,6 +246,11 @@ fn main() -> anyhow::Result<()> {
     // (WAYLAND_DISPLAY, XDG_RUNTIME_DIR) of s-compositor's compositor, learned from Ready.
     let wayland_env: Rc<RefCell<Option<(String, String)>>> = Rc::new(RefCell::new(None));
 
+    // Launched programs that fail to start are reported here (from a watcher
+    // thread, since the failure surfaces only after `/bin/sh` exits) and turned
+    // into an on-screen notification on the UI thread.
+    let (launch_fail_tx, launch_fail_rx) = std::sync::mpsc::channel::<LaunchError>();
+
     // Upload client frames into shared GL textures during rendering, where the
     // GL context is current, and hand them to Slint as borrowed textures.
     desktop
@@ -623,10 +628,11 @@ fn main() -> anyhow::Result<()> {
     // Launcher: run an arbitrary command, pointed at our compositor socket.
     desktop.on_launch({
         let wayland_env = wayland_env.clone();
+        let launch_fail_tx = launch_fail_tx.clone();
         move |cmd| {
             let env = wayland_env.borrow();
             let env = env.as_ref().map(|(d, r)| (d.as_str(), r.as_str()));
-            spawn_command(cmd.as_str(), env);
+            spawn_command(cmd.as_str(), env, &launch_fail_tx);
         }
     });
 
@@ -958,6 +964,7 @@ fn main() -> anyhow::Result<()> {
         let osd_until = osd_until.clone();
         let switcher_until = switcher_until.clone();
         let switcher_model = switcher_model.clone();
+        let launch_fail_tx = launch_fail_tx.clone();
         Rc::new(move |text: &str, ctrl, alt, shift, meta| {
             let key = keybind::normalize_text(text);
             let Some(bind) = keybinds
@@ -976,6 +983,7 @@ fn main() -> anyhow::Result<()> {
                     &wayland_env,
                     &vol_tx,
                     &notif,
+                    &launch_fail_tx,
                 );
                 // Flash the volume OSD on a volume key.
                 if matches!(
@@ -1089,6 +1097,7 @@ fn main() -> anyhow::Result<()> {
         let osd_until = osd_until.clone();
         let switcher_until = switcher_until.clone();
         let kb_layout_codes = kb_layout_codes.clone();
+        let launch_fail_rx = launch_fail_rx;
         let mut battery_low_warned = false;
         // When a single output is advertised (the common nested/X11 case) the
         // output tracks the host window size; remember the last applied logical
@@ -1129,6 +1138,15 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             if notif.expire() {
+                dirty = true;
+            }
+
+            // Surface programs that failed to launch as a notification.
+            while let Ok(err) = launch_fail_rx.try_recv() {
+                notif.internal(
+                    "Couldn't open application",
+                    &format!("{} — {}", err.cmd, err.reason),
+                );
                 dirty = true;
             }
 
@@ -1808,6 +1826,7 @@ fn run_action(
     wayland_env: &Rc<RefCell<Option<(String, String)>>>,
     vol_tx: &Option<std::sync::mpsc::Sender<volume::VolCommand>>,
     notif: &NotifState,
+    fail_tx: &std::sync::mpsc::Sender<LaunchError>,
 ) {
     use keybind::Action;
     let workspaces = WORKSPACES as i32;
@@ -1817,7 +1836,7 @@ fn run_action(
             let env = env
                 .as_ref()
                 .map(|(disp, run)| (disp.as_str(), run.as_str()));
-            spawn_command(cmd, env);
+            spawn_command(cmd, env, fail_tx);
         }
         Action::StartMenu => d.set_start_menu_visible(!d.get_start_menu_visible()),
         Action::Launcher => d.set_launcher_visible(true),
@@ -2500,9 +2519,21 @@ fn evdev_keycode(text: &str) -> Option<(u32, bool)> {
     Some(mapped)
 }
 
+/// A program launched via the shell that failed to start (e.g. the binary was
+/// not found). Sent to the UI thread so it can show a notification.
+struct LaunchError {
+    cmd: String,
+    reason: String,
+}
+
 /// Spawn a shell command detached, pointed at s-compositor's compositor. `wayland` is
-/// `(WAYLAND_DISPLAY, XDG_RUNTIME_DIR)` of s-compositor's own socket.
-fn spawn_command(cmd: &str, wayland: Option<(&str, &str)>) {
+/// `(WAYLAND_DISPLAY, XDG_RUNTIME_DIR)` of s-compositor's own socket. A fast
+/// failure (missing binary, immediate crash) is reported on `fail_tx`.
+fn spawn_command(
+    cmd: &str,
+    wayland: Option<(&str, &str)>,
+    fail_tx: &std::sync::mpsc::Sender<LaunchError>,
+) {
     let cmd = cmd.trim();
     if cmd.is_empty() {
         return;
@@ -2539,8 +2570,45 @@ fn spawn_command(cmd: &str, wayland: Option<(&str, &str)>) {
     }
 
     match command.spawn() {
-        Ok(child) => log::info!("launched `{cmd}` (pid {})", child.id()),
-        Err(err) => log::error!("failed to launch `{cmd}`: {err}"),
+        Ok(child) => {
+            log::info!("launched `{cmd}` (pid {})", child.id());
+            // We run via `/bin/sh -c`, so `spawn` almost always succeeds even
+            // when the real program is missing — the shell then exits 127. Watch
+            // briefly for such a fast failure and report it; otherwise let the
+            // program run (and reap it whenever it eventually exits).
+            let cmd = cmd.to_string();
+            let fail_tx = fail_tx.clone();
+            let _ = std::thread::Builder::new()
+                .name("launch-watch".into())
+                .spawn(move || {
+                    let mut child = child;
+                    std::thread::sleep(Duration::from_millis(700));
+                    match child.try_wait() {
+                        Ok(Some(status)) if !status.success() => {
+                            let reason = match status.code() {
+                                Some(127) => "command not found".to_string(),
+                                Some(126) => "not executable".to_string(),
+                                Some(code) => format!("exited immediately (status {code})"),
+                                None => "terminated by a signal".to_string(),
+                            };
+                            let _ = fail_tx.send(LaunchError { cmd, reason });
+                        }
+                        // Still running after the grace period: assume it started
+                        // fine, but wait so it doesn't linger as a zombie.
+                        Ok(None) => {
+                            let _ = child.wait();
+                        }
+                        _ => {}
+                    }
+                });
+        }
+        Err(err) => {
+            log::error!("failed to launch `{cmd}`: {err}");
+            let _ = fail_tx.send(LaunchError {
+                cmd: cmd.to_string(),
+                reason: err.to_string(),
+            });
+        }
     }
 }
 
