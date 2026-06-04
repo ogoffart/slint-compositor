@@ -14,6 +14,11 @@ slint.workspace = true
 log.workspace = true
 env_logger.workspace = true
 chrono.workspace = true
+# A Tokio runtime is entered on the main thread: when built in the workspace,
+# zbus is compiled with its `tokio` feature (enabled by `system-tray`), so
+# Slint's winit backend — which uses zbus to watch the XDG colour scheme —
+# expects a Tokio reactor and would otherwise panic at startup.
+tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
 
 [build-dependencies]
 slint-build.workspace = true

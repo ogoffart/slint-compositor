@@ -22,6 +22,15 @@ use model::Browser;
 fn main() -> Result<(), slint::PlatformError> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // Enter a Tokio runtime (with IO enabled) for the program's life so the
+    // zbus calls made by Slint's winit backend have a reactor in scope. See the
+    // note in Cargo.toml.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build Tokio runtime");
+    let _runtime_guard = runtime.enter();
+
     let window = Files::new()?;
     let items = Rc::new(VecModel::<FileItem>::default());
     window.set_items(items.clone().into());

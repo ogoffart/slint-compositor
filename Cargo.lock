@@ -4093,6 +4093,7 @@ dependencies = [
  "log",
  "slint",
  "slint-build",
+ "tokio",
 ]
 
 [[package]]
