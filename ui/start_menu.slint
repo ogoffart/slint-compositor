@@ -100,7 +100,7 @@ export component StartMenu inherits Rectangle {
 
             search := LineEdit {
                 font-size: 14px;
-                placeholder-text: "Search apps…";
+                placeholder-text: "Search apps or run a command…";
                 edited(text) => {
                     root.query-changed(text);
                 }
