@@ -35,7 +35,6 @@ pub use workspace::Workspaces;
 pub const WORKSPACE_COUNT: usize = 4;
 
 /// Events emitted by the compositor thread for the UI thread to consume.
-#[derive(Clone)]
 pub enum Event {
     /// The compositor is up and accepting clients on the given `WAYLAND_DISPLAY`.
     Ready {
@@ -75,6 +74,19 @@ pub enum Event {
         /// Whether s-compositor should draw server-side decorations for this window.
         decorated: bool,
     },
+    /// A window committed a GPU (dmabuf) buffer instead of shm. The planes carry
+    /// owned fds for the UI thread to import as an EGLImage-backed GL texture.
+    /// Only emitted when dmabuf is enabled (`S_COMPOSITOR_DMABUF`).
+    WindowDmabuf {
+        id: WindowId,
+        width: u32,
+        height: u32,
+        /// DRM FourCC format code.
+        fourcc: u32,
+        /// DRM format modifier.
+        modifier: u64,
+        planes: Vec<DmabufPlane>,
+    },
     /// A popup committed a frame, to be drawn at offset `(ox, oy)` from `parent`.
     PopupBuffer {
         id: WindowId,
@@ -103,6 +115,14 @@ pub enum Event {
 /// Output size in logical pixels, used to anchor layer-shell surfaces.
 pub const OUTPUT_W: i32 = 1280;
 pub const OUTPUT_H: i32 = 800;
+
+/// One plane of a dmabuf: an owned file descriptor plus its offset and stride.
+#[derive(Debug)]
+pub struct DmabufPlane {
+    pub fd: std::os::fd::OwnedFd,
+    pub offset: u32,
+    pub stride: u32,
+}
 
 /// One output (monitor) in the layout: a name and a position + size in the
 /// global compositor coordinate space.
@@ -219,6 +239,14 @@ impl std::fmt::Debug for Event {
                 .field("runtime_dir", runtime_dir)
                 .field("outputs", outputs)
                 .finish(),
+            Event::WindowDmabuf {
+                id, width, height, ..
+            } => f
+                .debug_struct("WindowDmabuf")
+                .field("id", id)
+                .field("width", width)
+                .field("height", height)
+                .finish_non_exhaustive(),
             Event::WindowAdded(id) => f.debug_tuple("WindowAdded").field(id).finish(),
             Event::WindowRemoved(id) => f.debug_tuple("WindowRemoved").field(id).finish(),
             Event::XwaylandReady { display } => f
@@ -354,6 +382,11 @@ pub fn run(
     // The first output is the primary, used where a single output is expected.
     let output = outputs[0].clone();
 
+    // dmabuf (GPU buffers): off unless explicitly enabled. Experimental — the
+    // import path needs a real GPU to validate.
+    let dmabuf_enabled = std::env::var_os("S_COMPOSITOR_DMABUF").is_some();
+    let dmabuf_state = smithay::wayland::dmabuf::DmabufState::new();
+
     let mut state = SlickState {
         display_handle: dh.clone(),
         loop_signal: event_loop.get_signal(),
@@ -370,6 +403,9 @@ pub fn run(
         seat,
         output,
         outputs,
+        dmabuf_state,
+        dmabuf_global: None,
+        dmabuf_enabled,
         workspaces: Workspaces::new(WORKSPACE_COUNT),
         next_window_id: 0,
         windows: std::collections::HashMap::new(),
@@ -383,6 +419,26 @@ pub fn run(
         pending_callbacks: Vec::new(),
         events: events.clone(),
     };
+
+    if state.dmabuf_enabled {
+        use smithay::backend::allocator::{Format, Fourcc, Modifier};
+        // Advertise common 32-bit formats with implicit/linear modifiers. The
+        // real set a GPU can import is unknown on this (UI-less) thread, so the
+        // import is attempted on the render thread and may fail there.
+        let formats: Vec<Format> = [Fourcc::Argb8888, Fourcc::Xrgb8888]
+            .into_iter()
+            .flat_map(|code| {
+                [Modifier::Invalid, Modifier::Linear]
+                    .into_iter()
+                    .map(move |modifier| Format { code, modifier })
+            })
+            .collect();
+        let global = state
+            .dmabuf_state
+            .create_global::<SlickState>(&dh, formats);
+        state.dmabuf_global = Some(global);
+        log::info!("dmabuf: advertising zwp_linux_dmabuf_v1 (experimental)");
+    }
 
     // Create the listening socket, falling back to a private directory if
     // XDG_RUNTIME_DIR is not writable (e.g. sandboxes, unusual sessions).
