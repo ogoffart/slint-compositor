@@ -1,6 +1,7 @@
 import { Theme } from "theme.slint";
 import { Button, ScrollView } from "std-widgets.slint";
 import { Notification } from "types.slint";
+import { CloseButton } from "close_button.slint";
 
 // The notification history + Do-Not-Disturb toggle, shown as a top-right flyout.
 export component NotificationCenter inherits Rectangle {
@@ -105,6 +106,11 @@ export component NotificationCenter inherits Rectangle {
                     }
                 }
             }
+        }
+        CloseButton {
+            x: parent.width - self.width - 10px;
+            y: 10px;
+            clicked => { root.dismiss(); }
         }
     }
 }

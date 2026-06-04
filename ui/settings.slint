@@ -1,6 +1,7 @@
 import { Theme } from "theme.slint";
 import { Button, SpinBox, LineEdit, ScrollView } from "std-widgets.slint";
 import { MenuEntry } from "types.slint";
+import { CloseButton } from "close_button.slint";
 
 // One editable shortcut row: icon, name, command and a remove button. Edits are
 // pushed straight into the backing model (field 0=icon, 1=name, 2=command).
@@ -315,6 +316,11 @@ export component Settings inherits Rectangle {
                     }
                 }
             }
+        }
+        CloseButton {
+            x: parent.width - self.width - 12px;
+            y: 12px;
+            clicked => { root.close(); }
         }
     }
 }

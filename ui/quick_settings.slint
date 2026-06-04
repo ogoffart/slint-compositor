@@ -1,6 +1,7 @@
 import { Theme } from "theme.slint";
 import { Slider, LineEdit, Button } from "std-widgets.slint";
 import { WifiNetwork } from "types.slint";
+import { CloseButton } from "close_button.slint";
 
 // A quick-settings flyout with a volume slider and a Wi-Fi network list, shown
 // as a dimming overlay anchored to the top-right. Clicking a secured network
@@ -193,6 +194,11 @@ export component QuickSettings inherits Rectangle {
                     }
                 }
             }
+        }
+        CloseButton {
+            x: parent.width - self.width - 10px;
+            y: 10px;
+            clicked => { root.dismiss(); }
         }
     }
 }

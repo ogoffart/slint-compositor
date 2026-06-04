@@ -1,0 +1,23 @@
+import { Theme } from "theme.slint";
+
+// A small round "×" button for dismissing a popup. Place it at the top-right
+// corner of a popup panel and wire `clicked` to the panel's dismiss callback.
+export component CloseButton inherits Rectangle {
+    callback clicked();
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    background: ta.has-hover ? #f38ba8 : Theme.surface;
+    Text {
+        text: "✕";
+        color: ta.has-hover ? #11111b : Theme.subtext;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
