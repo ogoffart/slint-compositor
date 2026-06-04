@@ -515,6 +515,23 @@ impl XdgShellHandler for SlickState {
     ) {
     }
 
+    fn move_request(
+        &mut self,
+        surface: ToplevelSurface,
+        _seat: smithay::reexports::wayland_server::protocol::wl_seat::WlSeat,
+        _serial: smithay::utils::Serial,
+    ) {
+        // The shell (UI thread) owns window positions, so it drives the move.
+        // Forward the request; the UI follows the pointer until release. This is
+        // how client-side-decorated toplevels (weston-terminal, GTK CSD) get
+        // moved, since they draw their own title bar instead of using ours.
+        if let Some(entry) = self.windows.get(surface.wl_surface()) {
+            let _ = self
+                .events
+                .send(Event::WindowMoveRequested { id: entry.id });
+        }
+    }
+
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         // The shell (UI thread) owns geometry, so it picks the work area that
         // excludes the panel; just flag the state and let it drive the resize.

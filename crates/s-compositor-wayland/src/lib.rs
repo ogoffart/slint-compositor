@@ -61,6 +61,12 @@ pub enum Event {
         id: WindowId,
         maximized: bool,
     },
+    /// The client asked to begin an interactive move (e.g. the user grabbed its
+    /// own client-side-decoration title bar). The shell drives the move by
+    /// following the pointer until the button is released.
+    WindowMoveRequested {
+        id: WindowId,
+    },
     /// The window's decoration mode changed (false = client draws its own).
     WindowDecorated {
         id: WindowId,
@@ -272,6 +278,9 @@ impl std::fmt::Debug for Event {
                 .field("id", id)
                 .field("maximized", maximized)
                 .finish(),
+            Event::WindowMoveRequested { id } => {
+                f.debug_struct("WindowMoveRequested").field("id", id).finish()
+            }
             Event::WindowTitleChanged(id, t) => f
                 .debug_tuple("WindowTitleChanged")
                 .field(id)

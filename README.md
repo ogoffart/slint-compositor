@@ -1,6 +1,67 @@
 A Wayland desktop shell written in Rust, using [Slint](https://slint.dev) for the
 UI and [Smithay](https://smithay.github.io/) for the Wayland protocol.
 
+## Building & running
+
+### 1. System prerequisites
+
+You need a Rust toolchain (stable, install via [rustup](https://rustup.rs)) and a
+few system libraries. The renderer is Skia (built from source by `skia-bindings`,
+which needs a C/C++ toolchain), and the seat/keymap handling needs `libxkbcommon`.
+
+On Debian/Ubuntu:
+
+```sh
+sudo apt install build-essential clang libxkbcommon-dev libfontconfig-1-dev \
+    libudev-dev libseat-dev libinput-dev libgbm-dev libdrm-dev libpulse-dev
+```
+
+The `libudev`/`libseat`/`libinput`/`libgbm`/`libdrm` packages are needed because
+the bare-metal `backend-linuxkms` backend is enabled by default (so the shell can
+run directly on a TTY without an X11/Wayland session).
+
+> **Note:** the linker needs the `libxkbcommon.so` *development* symlink, not just
+> the runtime `libxkbcommon.so.0`. If you see `error: unable to find library
+> -lxkbcommon` at link time, install `libxkbcommon-dev` (the command above) — or,
+> if only the runtime lib is present, symlink it:
+> `sudo ln -s libxkbcommon.so.0 /usr/lib/x86_64-linux-gnu/libxkbcommon.so`.
+
+### 2. Install a terminal (Alacritty)
+
+s-compositor uses **[Alacritty](https://alacritty.org)** — a fast, Wayland-native
+terminal written in Rust — as its **default terminal** (the desktop right-click
+"Open Terminal" entry, the panel/start-menu launchers, and the `Super+Return`
+shortcut all spawn it). Install it so the terminal works out of the box:
+
+```sh
+cargo install alacritty        # from crates.io, or:
+sudo apt install alacritty     # on recent Debian/Ubuntu
+```
+
+Other Rust terminals (WezTerm) and common ones (foot, kitty) are auto-detected if
+Alacritty is absent; prefer Alacritty for the smoothest nested experience. Avoid
+`gnome-terminal` when running nested — it is a D-Bus single-instance app and opens
+in your *outer* session rather than inside s-compositor.
+
+### 3. Build & run
+
+```sh
+cargo build
+cargo run -p s-compositor   # runs nested inside your current X11/Wayland session
+```
+
+`cargo run` opens a window for the shell. It then prints the `WAYLAND_DISPLAY` it
+created; point a Wayland client at that socket to see it composited:
+
+```sh
+WAYLAND_DISPLAY=wayland-1 alacritty
+```
+
+Settings (panel edge/size, theme, accent, background) are reachable from the ⚙
+button and persisted to `s-compositor.conf` in the working directory.
+
+Bare metal uses `backend-linuxkms` (runs directly on a TTY).
+
 ## Architecture
 
 s-compositor inverts the usual Smithay layering: **Slint owns rendering, output, input
@@ -53,7 +114,10 @@ Working today (verified nested under Xvfb + llvmpipe):
 - **Server-side decorations**: s-compositor forces `zxdg-decoration` ServerSide and
   draws the title bar (title, minimize/maximize/close) and border itself.
 - **Input**: pointer and keyboard are forwarded to the focused client; windows
-  can be moved (title-bar drag), resized (corner grip), maximized and minimized.
+  can be moved (server title-bar drag, or — for client-side-decorated apps like
+  Alacritty/weston-terminal — by dragging their own title bar, which drives an
+  interactive move), resized (corner grip), maximized and minimized. Client-side
+  decorations keep their transparent drop-shadow instead of a solid backdrop.
 - A panel dockable to any edge (configurable size) with a live clock that shows
   `HH:MM` on one line when the panel is wide enough and stacks to two lines when
   it is narrow, an **xeyes-style applet** whose pupils follow the pointer, a
@@ -137,48 +201,6 @@ gdbus call --session --dest org.freedesktop.impl.portal.desktop.scompositor \
   /req app "" "Pick a file" "@a{sv} {}"
 # => (uint32 0, {'uris': <['file:///path/to/chosen']>})
 ```
-
-## Building & running (for humans)
-
-### System prerequisites
-
-You need a Rust toolchain (stable, install via [rustup](https://rustup.rs)) and a
-few system libraries. The renderer is Skia (built from source by `skia-bindings`,
-which needs a C/C++ toolchain), and the seat/keymap handling needs `libxkbcommon`.
-
-On Debian/Ubuntu:
-
-```sh
-sudo apt install build-essential clang libxkbcommon-dev libfontconfig-1-dev \
-    libudev-dev libseat-dev libinput-dev libgbm-dev libdrm-dev libpulse-dev
-```
-
-The `libudev`/`libseat`/`libinput`/`libgbm`/`libdrm` packages are needed because
-the bare-metal `backend-linuxkms` backend is enabled by default (so the shell can
-run directly on a TTY without an X11/Wayland session).
-
-> **Note:** the linker needs the `libxkbcommon.so` *development* symlink, not just
-> the runtime `libxkbcommon.so.0`. If you see `error: unable to find library
-> -lxkbcommon` at link time, install `libxkbcommon-dev` (the command above) — or,
-> if only the runtime lib is present, symlink it:
-> `sudo ln -s libxkbcommon.so.0 /usr/lib/x86_64-linux-gnu/libxkbcommon.so`.
-
-### Build & run
-
-```sh
-cargo build
-cargo run -p s-compositor   # runs nested inside your current X11/Wayland session
-```
-
-`cargo run` opens a window for the shell. It then prints the `WAYLAND_DISPLAY` it
-created; point a Wayland client at that socket to see it composited:
-
-```sh
-WAYLAND_DISPLAY=wayland-1 foot
-```
-
-Settings (panel edge/size, theme, accent, background) are reachable from the ⚙
-button and persisted to `s-compositor.conf` in the working directory.
 
 ## Testing (for agents / CI)
 

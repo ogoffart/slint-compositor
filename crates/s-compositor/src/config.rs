@@ -96,9 +96,9 @@ pub fn discover_shortcuts() -> Vec<AppEntry> {
         "Terminal",
         &[
             "alacritty",
+            "wezterm",
             "foot",
             "kitty",
-            "wezterm",
             "gnome-terminal",
             "xterm",
         ],
@@ -127,19 +127,22 @@ pub fn file_manager_command() -> String {
 }
 
 /// The command to launch a terminal, used by the desktop right-click menu.
+/// Prefers Rust terminals (Alacritty, then WezTerm) — Wayland-native, no D-Bus
+/// single-instance quirks — before falling back to others. Defaults to
+/// `alacritty` (the recommended terminal; see the README) when none is found.
 pub fn terminal_command() -> String {
     [
         "alacritty",
+        "wezterm",
         "foot",
         "kitty",
-        "wezterm",
         "gnome-terminal",
         "xterm",
     ]
     .iter()
     .find(|bin| on_path(bin))
     .map(|bin| bin.to_string())
-    .unwrap_or_else(|| "xterm".to_string())
+    .unwrap_or_else(|| "alacritty".to_string())
 }
 
 /// Auto-discover sensible default start-menu apps: a browser, a terminal, a file
@@ -174,9 +177,9 @@ pub fn discover_default_apps() -> Vec<AppEntry> {
         "🖥",
         &[
             ("alacritty", "Terminal"),
+            ("wezterm", "Terminal"),
             ("foot", "Terminal"),
             ("kitty", "Terminal"),
-            ("wezterm", "Terminal"),
             ("gnome-terminal", "Terminal"),
             ("xterm", "Terminal"),
         ],

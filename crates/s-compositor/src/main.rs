@@ -1270,6 +1270,17 @@ fn main() -> anyhow::Result<()> {
                     }
                     continue;
                 }
+                // A client (typically client-side-decorated) asked to be moved:
+                // hand the window to the UI's interactive-move path, which follows
+                // the pointer until the button is released.
+                if let s_compositor_wayland::Event::WindowMoveRequested { id } = &event {
+                    if let Some(d) = weak.upgrade() {
+                        d.set_interactive_move_id(id.0 as i32);
+                        d.invoke_activate_window(id.0 as i32);
+                        dirty = true;
+                    }
+                    continue;
+                }
                 dirty |= handle_event(
                     event,
                     &model,

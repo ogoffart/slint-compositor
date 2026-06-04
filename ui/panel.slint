@@ -248,6 +248,7 @@ component LayoutSwitcher inherits Rectangle {
 component TaskItem inherits Rectangle {
     in property <WindowTile> tile;
     callback activate();
+    callback menu-requested(length, length);   // right-click: open window menu
     border-radius: 6px;
     background: tile.focused ? Theme.accent : (a.has-hover ? Theme.surface : Theme.panel);
     HorizontalLayout {
@@ -274,6 +275,11 @@ component TaskItem inherits Rectangle {
     a := TouchArea {
         clicked => {
             root.activate();
+        }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                root.menu-requested(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
         }
     }
 }
@@ -360,6 +366,9 @@ export component Panel inherits Rectangle {
     callback toggle-calendar();
     callback launch(string);
     callback activate(int);
+    // Right-click a taskbar entry: (id, maximized, pinned, x, y) to open the
+    // same context menu as right-clicking the window's title bar.
+    callback window-menu(int, bool, bool, length, length);
     callback switch-workspace(int);
     callback tray-activate(string);
     callback volume-scroll(float);
@@ -454,6 +463,7 @@ export component Panel inherits Rectangle {
                     && win.y + win.height / 2 < root.out-y + root.out-h;
                 height: self.visible ? 40px : 0px;
                 activate => { root.activate(win.id); }
+                menu-requested(mx, my) => { root.window-menu(win.id, win.maximized, win.pinned, mx, my); }
             }
         }
         PanelButton {
@@ -549,6 +559,7 @@ export component Panel inherits Rectangle {
                     && win.y + win.height / 2 < root.out-y + root.out-h;
                 width: self.visible ? 110px : 0px;
                 activate => { root.activate(win.id); }
+                menu-requested(mx, my) => { root.window-menu(win.id, win.maximized, win.pinned, mx, my); }
             }
         }
         PanelButton {

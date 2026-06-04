@@ -30,6 +30,11 @@ component WindowFrame inherits Rectangle {
     callback resized(length, length);            // resize-grip drag delta
     callback focus-requested();                  // raise + focus
     in property <bool> on-active-workspace: true;
+    // True while the client requested an interactive move (it grabbed its own
+    // CSD title bar). While set, pointer drags over the content move the window
+    // instead of being forwarded to the client.
+    in property <bool> interactive-moving;
+    callback end-move();                          // interactive move finished
 
     // Stay rendered while any open/minimize/close animation plays out, but never
     // when the window lives on another (inactive) virtual desktop.
@@ -64,7 +69,11 @@ component WindowFrame inherits Rectangle {
     border-radius: tile.decorated && !tile.maximized ? 8px : 0px;
     border-width: tile.decorated ? 1px : 0px;
     border-color: tile.focused ? Theme.accent : Theme.hover;
-    background: Theme.surface;
+    // Only server-side-decorated windows get an opaque body; client-decorated
+    // ones (e.g. weston-terminal) draw their own frame and surround it with a
+    // transparent shadow, so the frame must stay transparent or that shadow
+    // region shows up as a big solid rectangle around the window.
+    background: tile.decorated ? Theme.surface : transparent;
     drop-shadow-blur: tile.decorated && !tile.maximized ? 18px : 0px;
     drop-shadow-color: #00000099;
     drop-shadow-offset-y: 5px;
@@ -208,19 +217,37 @@ component WindowFrame inherits Rectangle {
                 height: 100%;
                 pointer-event(e) => {
                     if e.kind == PointerEventKind.down {
+                        // A fresh press starts a new interaction: drop any stale
+                        // interactive-move state (e.g. a move request whose button
+                        // release we never saw).
+                        root.end-move();
                         root.focus-requested();
                         fs.focus();
                         root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 1, self.btn-code(e.button));
                     } else if e.kind == PointerEventKind.up {
+                        if root.interactive-moving {
+                            root.dropped(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
+                            root.end-move();
+                        }
                         root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 2, self.btn-code(e.button));
                     } else if e.kind == PointerEventKind.move {
-                        root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
-                        root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
+                        if root.interactive-moving {
+                            root.moved(ta.mouse-x - ta.pressed-x, ta.mouse-y - ta.pressed-y);
+                            root.dragging(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
+                        } else {
+                            root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
+                            root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
+                        }
                     }
                 }
                 moved => {
-                    root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
-                    root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
+                    if root.interactive-moving {
+                        root.moved(ta.mouse-x - ta.pressed-x, ta.mouse-y - ta.pressed-y);
+                        root.dragging(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
+                    } else {
+                        root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
+                        root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
+                    }
                 }
                 scroll-event(e) => {
                     root.scroll(e.delta-x / 1px, e.delta-y / 1px);
@@ -310,6 +337,9 @@ export component Desktop inherits Window {
         ? root.height - root.panel-size : root.height;
     // Drag snap preview zone: 0=none, 1=left, 2=right, 3=maximize.
     in-out property <int> snap-preview: 0;
+    // Id of the window currently in a client-initiated interactive move (-1 =
+    // none). Set by the host when a client requests a move; cleared on release.
+    in-out property <int> interactive-move-id: -1;
     in-out property <int> active-workspace: 0;
     in property <int> workspace-count: 4;
     in-out property <bool> launcher-visible: false;
@@ -541,6 +571,10 @@ export component Desktop inherits Window {
     for win in root.windows: WindowFrame {
         tile: win;
         on-active-workspace: win.workspace == root.active-workspace;
+        interactive-moving: root.interactive-move-id == win.id;
+        end-move => {
+            root.interactive-move-id = -1;
+        }
         close => {
             root.close-window(win.id);
         }
@@ -677,6 +711,14 @@ export component Desktop inherits Window {
         }
         activate(id) => {
             root.activate-window(id);
+        }
+        window-menu(id, maxed, pinned, mx, my) => {
+            root.window-menu-id = id;
+            root.window-menu-maximized = maxed;
+            root.window-menu-pinned = pinned;
+            root.window-menu-x = mx;
+            root.window-menu-y = my;
+            root.window-menu-visible = true;
         }
         switch-workspace(n) => {
             root.active-workspace = n;
