@@ -35,6 +35,46 @@ component WindowFrame inherits Rectangle {
     // instead of being forwarded to the client.
     in property <bool> interactive-moving;
     callback end-move();                          // interactive move finished
+    // Client-initiated interactive resize: the xdg resize-edge bitmask (1=top,
+    // 2=bottom, 4=left, 8=right; 0 = not resizing). While non-zero, pointer
+    // drags over the content resize the window from the grabbed edge(s).
+    in property <int> resize-edges;
+    // Reports a new absolute geometry (width, height, x, y) during a resize.
+    callback resize-to(length, length, length, length);
+    callback end-resize();
+    property <bool> resizing: root.resize-edges != 0;
+    property <bool> r-top: Math.mod(root.resize-edges, 2) >= 1;
+    property <bool> r-bottom: Math.mod(floor(root.resize-edges / 2), 2) >= 1;
+    property <bool> r-left: Math.mod(floor(root.resize-edges / 4), 2) >= 1;
+    property <bool> r-right: Math.mod(floor(root.resize-edges / 8), 2) >= 1;
+    // Geometry + global cursor captured at the press that began a resize, so the
+    // new size can be computed absolutely (robust against the async buffer lag).
+    property <length> rs-cx;
+    property <length> rs-cy;
+    property <length> rs-w;
+    property <length> rs-h;
+    property <length> rs-x;
+    property <length> rs-y;
+    // Latest global cursor during a resize, and the resulting geometry. The size
+    // is computed from the press snapshot plus the total cursor delta (absolute,
+    // not incremental) so it stays correct despite the client's redraw lag. For
+    // top/left edges the origin shifts so the opposite edge stays anchored.
+    property <length> rcur-x;
+    property <length> rcur-y;
+    property <length> r-gdx: root.rcur-x - root.rs-cx;
+    property <length> r-gdy: root.rcur-y - root.rs-cy;
+    property <length> r-new-w: max(root.rs-w + (root.r-right ? root.r-gdx : 0px) - (root.r-left ? root.r-gdx : 0px), 80px);
+    property <length> r-new-h: max(root.rs-h + (root.r-bottom ? root.r-gdy : 0px) - (root.r-top ? root.r-gdy : 0px), 48px);
+    property <length> r-new-x: root.rs-x + (root.r-left ? (root.rs-w - root.r-new-w) : 0px);
+    property <length> r-new-y: root.rs-y + (root.r-top ? (root.rs-h - root.r-new-h) : 0px);
+
+    // Drive a resize step: record the current global cursor, then report the new
+    // absolute geometry to the host.
+    function apply-resize(gx: length, gy: length) {
+        root.rcur-x = gx;
+        root.rcur-y = gy;
+        root.resize-to(root.r-new-w, root.r-new-h, root.r-new-x, root.r-new-y);
+    }
 
     // Stay rendered while any open/minimize/close animation plays out, but never
     // when the window lives on another (inactive) virtual desktop.
@@ -218,9 +258,17 @@ component WindowFrame inherits Rectangle {
                 pointer-event(e) => {
                     if e.kind == PointerEventKind.down {
                         // A fresh press starts a new interaction: drop any stale
-                        // interactive-move state (e.g. a move request whose button
-                        // release we never saw).
+                        // move/resize state (e.g. a request whose button release we
+                        // never saw), and snapshot the geometry + global cursor so a
+                        // client move/resize request can be applied absolutely.
                         root.end-move();
+                        root.end-resize();
+                        root.rs-cx = ta.absolute-position.x + ta.mouse-x;
+                        root.rs-cy = ta.absolute-position.y + ta.mouse-y;
+                        root.rs-w = tile.width;
+                        root.rs-h = tile.height;
+                        root.rs-x = tile.x;
+                        root.rs-y = tile.y;
                         root.focus-requested();
                         fs.focus();
                         root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 1, self.btn-code(e.button));
@@ -229,16 +277,21 @@ component WindowFrame inherits Rectangle {
                             root.dropped(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
                             root.end-move();
                         }
+                        if root.resizing {
+                            root.end-resize();
+                        }
                         root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 2, self.btn-code(e.button));
-                    } else if e.kind == PointerEventKind.move && !root.interactive-moving {
-                        // While interactively moving, the `moved` callback below
-                        // owns the drag; don't also forward motion (or move twice).
+                    } else if e.kind == PointerEventKind.move && !root.interactive-moving && !root.resizing {
+                        // While moving/resizing, the `moved` callback below owns the
+                        // drag; don't also forward motion (or apply it twice).
                         root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
                         root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
                     }
                 }
                 moved => {
-                    if root.interactive-moving {
+                    if root.resizing {
+                        root.apply-resize(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
+                    } else if root.interactive-moving {
                         // Client-initiated move: drag the window with the pointer
                         // (delta from the press point), reusing the snap preview.
                         root.moved(ta.mouse-x - ta.pressed-x, ta.mouse-y - ta.pressed-y);
@@ -339,6 +392,10 @@ export component Desktop inherits Window {
     // Id of the window currently in a client-initiated interactive move (-1 =
     // none). Set by the host when a client requests a move; cleared on release.
     in-out property <int> interactive-move-id: -1;
+    // Window currently in a client-initiated interactive resize (-1 = none) and
+    // the xdg resize-edge bitmask. Set by the host on request; cleared on release.
+    in-out property <int> interactive-resize-id: -1;
+    in-out property <int> interactive-resize-edges;
     in-out property <int> active-workspace: 0;
     in property <int> workspace-count: 4;
     in-out property <bool> launcher-visible: false;
@@ -439,6 +496,9 @@ export component Desktop inherits Window {
     callback drop-window(int, length, length);   // window dropped at cursor (x,y)
     callback window-move-to-workspace(int, int);  // window id, workspace index
     callback resize-window(int, length, length);
+    // Absolute resize from a client-initiated interactive resize: id, new width,
+    // height, and origin (x, y — shifted for top/left edges).
+    callback resize-window-to(int, length, length, length, length);
     callback pointer-window(int, float, float, int, int);
     callback scroll-window(int, float, float);
     callback key-window(int, string, bool, bool, bool, bool, bool);
@@ -573,6 +633,13 @@ export component Desktop inherits Window {
         interactive-moving: root.interactive-move-id == win.id;
         end-move => {
             root.interactive-move-id = -1;
+        }
+        resize-edges: root.interactive-resize-id == win.id ? root.interactive-resize-edges : 0;
+        resize-to(w, h, nx, ny) => {
+            root.resize-window-to(win.id, w, h, nx, ny);
+        }
+        end-resize => {
+            root.interactive-resize-id = -1;
         }
         close => {
             root.close-window(win.id);

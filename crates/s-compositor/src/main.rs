@@ -891,6 +891,31 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Absolute resize from a client-initiated interactive resize. Send the new
+    // size to the client (an xdg configure) and move the origin now so the
+    // grabbed edge tracks the pointer; the buffer arrives at the new size and
+    // settles the opposite edge.
+    desktop.on_resize_window_to({
+        let cmd_tx = cmd_tx.clone();
+        let model = model.clone();
+        let windows = windows.clone();
+        move |id, w, h, x, y| {
+            let windows = windows.borrow();
+            if let Some(&row) = windows.rows.get(&(id as u64)) {
+                if let Some(mut tile) = model.row_data(row) {
+                    tile.x = x;
+                    tile.y = y;
+                    model.set_row_data(row, tile);
+                }
+            }
+            let _ = cmd_tx.send(s_compositor_wayland::Command::ResizeWindow {
+                id: s_compositor_wayland::WindowId(id as u64),
+                width: w.max(1.0) as i32,
+                height: h.max(1.0) as i32,
+            });
+        }
+    });
+
     // Pointer events over a client window.
     desktop.on_pointer_window({
         let cmd_tx = cmd_tx.clone();
@@ -1294,6 +1319,17 @@ fn main() -> anyhow::Result<()> {
                 if let s_compositor_wayland::Event::WindowMoveRequested { id } = &event {
                     if let Some(d) = weak.upgrade() {
                         d.set_interactive_move_id(id.0 as i32);
+                        d.invoke_activate_window(id.0 as i32);
+                        dirty = true;
+                    }
+                    continue;
+                }
+                // A client asked to be resized from one of its CSD borders: hand
+                // the window + grabbed edges to the UI's interactive-resize path.
+                if let s_compositor_wayland::Event::WindowResizeRequested { id, edges } = &event {
+                    if let Some(d) = weak.upgrade() {
+                        d.set_interactive_resize_edges(*edges as i32);
+                        d.set_interactive_resize_id(id.0 as i32);
                         d.invoke_activate_window(id.0 as i32);
                         dirty = true;
                     }

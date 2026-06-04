@@ -67,6 +67,14 @@ pub enum Event {
     WindowMoveRequested {
         id: WindowId,
     },
+    /// The client asked to begin an interactive resize (e.g. the user grabbed a
+    /// client-side-decoration resize border). `edges` is the xdg-shell resize
+    /// edge bitmask (1=top, 2=bottom, 4=left, 8=right; corners are ORs). The
+    /// shell drives the resize by following the pointer until release.
+    WindowResizeRequested {
+        id: WindowId,
+        edges: u32,
+    },
     /// The window's decoration mode changed (false = client draws its own).
     WindowDecorated {
         id: WindowId,
@@ -281,6 +289,11 @@ impl std::fmt::Debug for Event {
             Event::WindowMoveRequested { id } => {
                 f.debug_struct("WindowMoveRequested").field("id", id).finish()
             }
+            Event::WindowResizeRequested { id, edges } => f
+                .debug_struct("WindowResizeRequested")
+                .field("id", id)
+                .field("edges", edges)
+                .finish(),
             Event::WindowTitleChanged(id, t) => f
                 .debug_tuple("WindowTitleChanged")
                 .field(id)

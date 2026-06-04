@@ -592,6 +592,24 @@ impl XdgShellHandler for SlickState {
         }
     }
 
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        _seat: smithay::reexports::wayland_server::protocol::wl_seat::WlSeat,
+        _serial: smithay::utils::Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        // Like move, the shell owns geometry and drives the resize. The xdg edge
+        // value is already a bitmask (1=top, 2=bottom, 4=left, 8=right; corners
+        // are ORs), so pass it straight through for the UI to interpret.
+        if let Some(entry) = self.windows.get(surface.wl_surface()) {
+            let _ = self.events.send(Event::WindowResizeRequested {
+                id: entry.id,
+                edges: edges.into(),
+            });
+        }
+    }
+
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         // The shell (UI thread) owns geometry, so it picks the work area that
         // excludes the panel; just flag the state and let it drive the resize.
