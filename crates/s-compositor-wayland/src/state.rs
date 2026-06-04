@@ -103,6 +103,12 @@ pub struct WindowEntry {
     /// Whether s-compositor draws server-side decorations for this window. False when
     /// the client requested client-side decorations via xdg-decoration.
     pub decorated: bool,
+    /// Top-left of the client's declared window geometry within its buffer
+    /// (`xdg_surface.set_window_geometry`). Client-side-decorated apps draw a
+    /// transparent shadow margin around the real window and exclude it from this
+    /// rect; we crop the buffer to it, so this offset must be added to incoming
+    /// pointer coordinates to map them back to surface-local space.
+    pub geometry_offset: (i32, i32),
 }
 
 /// A tracked layer-shell surface (panel, bar, wallpaper, notification).

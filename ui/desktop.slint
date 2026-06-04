@@ -230,18 +230,17 @@ component WindowFrame inherits Rectangle {
                             root.end-move();
                         }
                         root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 2, self.btn-code(e.button));
-                    } else if e.kind == PointerEventKind.move {
-                        if root.interactive-moving {
-                            root.moved(ta.mouse-x - ta.pressed-x, ta.mouse-y - ta.pressed-y);
-                            root.dragging(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
-                        } else {
-                            root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
-                            root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
-                        }
+                    } else if e.kind == PointerEventKind.move && !root.interactive-moving {
+                        // While interactively moving, the `moved` callback below
+                        // owns the drag; don't also forward motion (or move twice).
+                        root.pointer(ta.mouse-x / 1px, ta.mouse-y / 1px, 0, 0);
+                        root.cursor-moved(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
                     }
                 }
                 moved => {
                     if root.interactive-moving {
+                        // Client-initiated move: drag the window with the pointer
+                        // (delta from the press point), reusing the snap preview.
                         root.moved(ta.mouse-x - ta.pressed-x, ta.mouse-y - ta.pressed-y);
                         root.dragging(ta.absolute-position.x + ta.mouse-x, ta.absolute-position.y + ta.mouse-y);
                     } else {

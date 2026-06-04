@@ -72,6 +72,15 @@ impl SlickState {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // The displayed buffer is cropped to the window geometry, so its (0,0) is
+        // at `geometry_offset` within the surface. Shift incoming coordinates back
+        // so the client receives correct surface-local positions.
+        let (ox, oy) = self
+            .windows
+            .values()
+            .find(|e| e.id == id)
+            .map(|e| e.geometry_offset)
+            .unwrap_or((0, 0));
         let serial = SERIAL_COUNTER.next_serial();
         let time = self.millis_since_start();
         // We treat each window's surface origin as (0,0), so the surface-local
@@ -80,7 +89,7 @@ impl SlickState {
             self,
             Some((surface, (0.0, 0.0).into())),
             &MotionEvent {
-                location: (x, y).into(),
+                location: (x + ox as f64, y + oy as f64).into(),
                 serial,
                 time,
             },

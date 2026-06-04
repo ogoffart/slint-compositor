@@ -34,9 +34,10 @@ use smithay::wayland::selection::data_device::{
 use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTarget};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-    XdgToplevelSurfaceData,
+    PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
+    XdgShellState, XdgToplevelSurfaceData,
 };
+use smithay::utils::{Logical, Rectangle};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::wayland::shm::{ShmHandler, ShmState};
@@ -92,7 +93,16 @@ impl CompositorHandler for SlickState {
             let buffer = composite_tree(&root, &mut cache, &mut callbacks);
             self.surface_pixels = cache;
             self.pending_callbacks.append(&mut callbacks);
-            if let Some((width, height, pixels)) = buffer {
+            if let Some(buffer) = buffer {
+                // Crop to the client's declared window geometry so we drop the
+                // transparent client-side-decoration shadow margin (otherwise it
+                // shows as a big box around the window). Record the crop offset so
+                // pointer input maps back to surface-local coordinates.
+                let geometry = window_geometry(&root);
+                let ((width, height, pixels), offset) = crop_to_geometry(buffer, geometry);
+                if let Some(entry) = self.windows.get_mut(&root) {
+                    entry.geometry_offset = offset;
+                }
                 let _ = self.events.send(Event::WindowBuffer {
                     id,
                     width,
@@ -371,6 +381,55 @@ impl SlickState {
     }
 }
 
+/// The client's declared window geometry (`xdg_surface.set_window_geometry`),
+/// in surface-logical coordinates, if any.
+fn window_geometry(surface: &WlSurface) -> Option<Rectangle<i32, Logical>> {
+    with_states(surface, |states| {
+        states
+            .cached_state
+            .get::<SurfaceCachedState>()
+            .current()
+            .geometry
+    })
+}
+
+/// Crop a tightly-packed RGBA8 `(w, h, pixels)` buffer to `geometry` (clamped to
+/// the buffer), returning the cropped buffer and the top-left offset used.
+///
+/// Client-side-decorated apps (weston-terminal, GTK) pad their buffer with a
+/// transparent shadow/resize margin and report the real window rectangle via
+/// `set_window_geometry`. Cropping to it drops that margin so the shell shows
+/// only the window, not a big box around it. A missing or full-buffer geometry
+/// is a no-op (offset `(0, 0)`).
+fn crop_to_geometry(
+    buffer: (u32, u32, Vec<u8>),
+    geometry: Option<Rectangle<i32, Logical>>,
+) -> ((u32, u32, Vec<u8>), (i32, i32)) {
+    let (w, h, pixels) = buffer;
+    let Some(rect) = geometry else {
+        return ((w, h, pixels), (0, 0));
+    };
+    let (cw, ch) = (w as i32, h as i32);
+    let x0 = rect.loc.x.clamp(0, cw);
+    let y0 = rect.loc.y.clamp(0, ch);
+    let x1 = (rect.loc.x + rect.size.w).clamp(0, cw);
+    let y1 = (rect.loc.y + rect.size.h).clamp(0, ch);
+    let nw = x1 - x0;
+    let nh = y1 - y0;
+    // Degenerate or already full-size: nothing to crop.
+    if nw <= 0 || nh <= 0 || (x0 == 0 && y0 == 0 && nw == cw && nh == ch) {
+        return ((w, h, pixels), (0, 0));
+    }
+    let mut out = vec![0u8; (nw * nh * 4) as usize];
+    let row_bytes = (nw * 4) as usize;
+    for row in 0..nh {
+        let src = (((y0 + row) * cw + x0) * 4) as usize;
+        let dst = (row * nw * 4) as usize;
+        out[dst..dst + row_bytes].copy_from_slice(&pixels[src..src + row_bytes]);
+    }
+    ((nw as u32, nh as u32, out), (x0, y0))
+}
+
 /// Read the toplevel title from a surface's xdg state.
 fn read_title(surface: &WlSurface) -> String {
     with_states(surface, |states| {
@@ -453,6 +512,7 @@ impl XdgShellHandler for SlickState {
                 // always draw CSD but don't speak the decoration protocol (GTK,
                 // weston toytoolkit).
                 decorated: false,
+                geometry_offset: (0, 0),
             },
         );
         let _ = self.events.send(Event::WindowAdded(id));
@@ -793,3 +853,73 @@ delegate_seat!(SlickState);
 delegate_output!(SlickState);
 delegate_data_device!(SlickState);
 smithay::delegate_primary_selection!(SlickState);
+
+#[cfg(test)]
+mod crop_tests {
+    use super::crop_to_geometry;
+    use smithay::utils::Rectangle;
+
+    /// Build a `w`x`h` RGBA8 buffer whose every pixel's R channel is its column
+    /// and G channel is its row, so a crop is easy to verify positionally.
+    fn ramp(w: i32, h: i32) -> (u32, u32, Vec<u8>) {
+        let mut px = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                px.extend_from_slice(&[x as u8, y as u8, 0, 255]);
+            }
+        }
+        (w as u32, h as u32, px)
+    }
+
+    fn pixel(buf: &(u32, u32, Vec<u8>), x: i32, y: i32) -> [u8; 4] {
+        let i = ((y * buf.0 as i32 + x) * 4) as usize;
+        buf.2[i..i + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn no_geometry_is_identity() {
+        let (out, off) = crop_to_geometry(ramp(4, 4), None);
+        assert_eq!((out.0, out.1), (4, 4));
+        assert_eq!(off, (0, 0));
+    }
+
+    #[test]
+    fn full_geometry_is_identity() {
+        let geo = Some(Rectangle::new((0, 0).into(), (4, 4).into()));
+        let (out, off) = crop_to_geometry(ramp(4, 4), geo);
+        assert_eq!((out.0, out.1), (4, 4));
+        assert_eq!(off, (0, 0));
+    }
+
+    #[test]
+    fn crops_away_shadow_margin() {
+        // A 10x10 buffer with the real window a 6x6 rect at (2,2): the
+        // surrounding 2px is the CSD shadow that must be dropped.
+        let geo = Some(Rectangle::new((2, 2).into(), (6, 6).into()));
+        let (out, off) = crop_to_geometry(ramp(10, 10), geo);
+        assert_eq!((out.0, out.1), (6, 6));
+        assert_eq!(off, (2, 2));
+        // Top-left of the crop is the original (2,2) pixel.
+        assert_eq!(pixel(&out, 0, 0), [2, 2, 0, 255]);
+        // Bottom-right of the crop is the original (7,7) pixel.
+        assert_eq!(pixel(&out, 5, 5), [7, 7, 0, 255]);
+    }
+
+    #[test]
+    fn geometry_is_clamped_to_buffer() {
+        // Geometry larger than the buffer (or partly outside) is clamped, never
+        // panics or reads OOB.
+        let geo = Some(Rectangle::new((-3, -3).into(), (100, 100).into()));
+        let (out, off) = crop_to_geometry(ramp(8, 8), geo);
+        assert_eq!((out.0, out.1), (8, 8));
+        assert_eq!(off, (0, 0));
+    }
+
+    #[test]
+    fn degenerate_geometry_is_identity() {
+        let geo = Some(Rectangle::new((4, 4).into(), (0, 0).into()));
+        let (out, off) = crop_to_geometry(ramp(8, 8), geo);
+        assert_eq!((out.0, out.1), (8, 8));
+        assert_eq!(off, (0, 0));
+    }
+}
