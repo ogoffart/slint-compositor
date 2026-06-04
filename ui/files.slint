@@ -644,6 +644,13 @@ export component Files inherits Window {
                         }
 
                         scroll := ScrollView {
+                            // All view contents are wrapped in `if` blocks, so the
+                            // ScrollView can't infer the viewport size from them;
+                            // drive it explicitly from the active view's content.
+                            viewport-width: scroll.visible-width;
+                            viewport-height: root.view == 0
+                                ? max(scroll.visible-height, ceil(root.items.length / root.columns) * root.tile-h)
+                                : max(scroll.visible-height, root.items.length * root.row-h);
                             // --- Icon grid -------------------------------------
                             if root.view == 0: Rectangle {
                                 width: scroll.visible-width;
