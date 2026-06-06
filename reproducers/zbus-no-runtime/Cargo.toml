@@ -1,0 +1,15 @@
+[package]
+name = "zbus-no-runtime-repro"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Own (empty) workspace table so this stays out of slick's workspace.
+[workspace]
+
+[dependencies]
+# In a real project the `tokio` feature is NOT requested here — it gets enabled
+# transitively by another dependency (e.g. `system-tray`) via Cargo feature
+# unification. Requesting it directly reproduces that unified state.
+zbus = { version = "5", features = ["tokio"] }
+futures-lite = "2"
