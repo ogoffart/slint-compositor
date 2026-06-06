@@ -4376,6 +4376,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "slint-zbus-crash-repro"
+version = "0.1.0"
+dependencies = [
+ "slint",
+ "zbus",
+]
+
+[[package]]
 name = "slotmap"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

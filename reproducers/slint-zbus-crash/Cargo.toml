@@ -1,0 +1,17 @@
+[package]
+name = "slint-zbus-crash-repro"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Own (empty) workspace table so this stays out of slick's workspace.
+[workspace]
+
+[dependencies]
+# Default features include the winit backend, whose XDG colour-scheme watcher
+# uses zbus on the UI thread.
+slint = "1.16"
+# This forces zbus's `tokio` feature on. In slick it is NOT requested here — it
+# arrives transitively via `system-tray` through Cargo feature unification. The
+# unified state is what matters; requesting it directly reproduces it.
+zbus = { version = "5", features = ["tokio"] }
